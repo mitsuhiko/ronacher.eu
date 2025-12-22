@@ -142,9 +142,13 @@
         float s = dot(delta, shadowDir);
         float t = dot(delta, perpDir);
 
+        // Add bias to lift shadow above wave surface to prevent clipping
+        float waveBias = 0.4;
+        float effectiveY = worldPos.y - waveBias;
+
         float topY = uBarrelCenter.y + uBarrelHalfHeight;
-        float maxS = (topY - worldPos.y) * (lenXZ / max(lightDir.y, 0.001));
-        maxS *= 4.0;
+        float maxS = (topY - effectiveY) * (lenXZ / max(lightDir.y, 0.001));
+        maxS *= 2.0;  // Reduced from 4.0 to prevent over-extension
         if (maxS <= 0.0) return 0.0;
 
         float forwardMask = step(0.0, s);
@@ -154,7 +158,13 @@
         float width = uBarrelRadius * 1.15 + s * 0.10;
         float core = 1.0 - smoothstep(width, width + 2.0, abs(t));
 
-        return core * forwardMask * lengthMask * startFade;
+        // Fade shadow when wave is higher than expected (wave crest clipping)
+        float waveHeightAtShadow = waveHeightAt(worldPos.xz);
+        float waveHeightAtBarrel = waveHeightAt(uBarrelCenter.xz);
+        float heightDiff = waveHeightAtShadow - waveHeightAtBarrel;
+        float heightFade = 1.0 - smoothstep(0.0, 0.6, heightDiff);
+
+        return core * forwardMask * lengthMask * startFade * heightFade;
       }
 
       float waveShadowAt(vec3 worldPos) {
