@@ -20,7 +20,7 @@
   resize();
   window.addEventListener('resize', resize);
 
-  // === BACKGROUND SHADER (gradient sky) ===
+  // === BACKGROUND SHADER (gradient sky with stars) ===
   const bgVertexSource = `
     attribute vec2 a_position;
     varying vec2 vUv;
@@ -32,10 +32,210 @@
   const bgFragmentSource = `
     precision highp float;
     varying vec2 vUv;
+    uniform float uTime;
+    uniform float uAspect;
+    
+    // Pseudo-random hash function
+    float hash(vec2 p) {
+      return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+    }
+    
+    float hash1(float p) {
+      return fract(sin(p * 127.1) * 43758.5453);
+    }
+    
+    // Generate stars in a grid cell
+    float star(vec2 uv, vec2 cellId, float cellAspect) {
+      float rnd = hash(cellId);
+      
+      // ~85% of cells have stars
+      if (rnd > 0.85) return 0.0;
+      
+      // Random position within cell
+      vec2 starPos = vec2(hash(cellId + 0.1), hash(cellId + 0.2));
+      
+      // Distance to star center - correct for cell aspect ratio
+      vec2 diff = uv - starPos;
+      diff.x *= cellAspect;
+      float d = length(diff);
+      
+      // Random size (40% smaller: 0.007 to 0.021)
+      float size = 0.007 + hash(cellId + 0.3) * 0.014;
+      
+      // Sharper, brighter star
+      float star = smoothstep(size, size * 0.1, d);
+      
+      // Subtle slow flicker - each star has its own phase and speed
+      float flickerPhase = hash(cellId + 0.4) * 6.28318;
+      float flickerSpeed = 0.2 + hash(cellId + 0.5) * 0.3; // 0.2 to 0.5
+      float flicker = 0.75 + 0.25 * sin(uTime * flickerSpeed + flickerPhase);
+      
+      // Slight secondary flicker for more organic feel
+      float flicker2 = 0.9 + 0.1 * sin(uTime * flickerSpeed * 1.7 + flickerPhase * 2.0);
+      
+      return star * flicker * flicker2;
+    }
+    
+    // Distance from point p to line segment a-b
+    float distToSegment(vec2 p, vec2 a, vec2 b) {
+      vec2 ab = b - a;
+      vec2 ap = p - a;
+      float t = clamp(dot(ap, ab) / dot(ab, ab), 0.0, 1.0);
+      return length(ap - ab * t);
+    }
+    
+    // Shooting star with arc trajectory - trail follows actual path
+    float shootingStar(vec2 uv, float meteorIdx) {
+      // Each meteor has its own timing cycle (40-80 seconds for ~1 per minute avg with 2 meteors)
+      float baseCycle = 60.0;
+      float cycleVariation = hash1(meteorIdx * 3.17) * 40.0 - 20.0; // -20 to +20 seconds
+      float cycle = baseCycle + cycleVariation;
+      
+      // Offset so meteors don't start immediately - push first appearance 20-50s out
+      float initialDelay = 20.0 + hash1(meteorIdx * 7.31) * 30.0;
+      
+      // Skip if we haven't reached the initial delay yet
+      if (uTime < initialDelay) return 0.0;
+      
+      // Time within this meteor's cycle (starting after initial delay)
+      float adjustedTime = uTime - initialDelay;
+      float t = mod(adjustedTime, cycle);
+      
+      // Random seed for this meteor's current cycle
+      float seed = floor(adjustedTime / cycle);
+      
+      // Meteor only active during flight (duration: 1.0s to 4.0s)
+      float duration = 1.0 + hash1(meteorIdx * 5.23 + seed) * 3.0;
+      if (t > duration) return 0.0;
+      
+      // Normalized progress (0 to 1)
+      float progress = t / duration;
+      float startX = 0.1 + hash1(meteorIdx * 1.23 + seed) * 0.8;
+      float startY = 0.7 + hash1(meteorIdx * 2.34 + seed) * 0.25;
+      vec2 startPos = vec2(startX, startY);
+      
+      // Random angle (mostly downward-right or downward-left)
+      float angle = -0.3 - hash1(meteorIdx * 4.56 + seed) * 0.7;
+      if (hash1(meteorIdx * 9.12 + seed) > 0.5) angle = 3.14159 - angle; // Mirror some
+      
+      // Trajectory length (longer trails)
+      float trajectoryLen = 0.25 + hash1(meteorIdx * 6.78 + seed) * 0.15;
+      
+      // Arc strength
+      float arcStrength = 0.04 + hash1(meteorIdx * 8.91 + seed) * 0.03;
+      
+      vec2 velocity = vec2(cos(angle), sin(angle)) * trajectoryLen;
+      
+      // Helper to get arc position at parameter s
+      #define ARC_POS(s) (startPos + velocity * (s) - vec2(0.0, arcStrength * (s) * (s)))
+      
+      // Current head position
+      vec2 headPos = ARC_POS(progress);
+      
+      // Aspect-corrected UV
+      vec2 uvCorrected = vec2(uv.x * uAspect, uv.y);
+      
+      // Trail goes from current position back (length: 0.35 to 0.70)
+      float trailLen = 0.35 + hash1(meteorIdx * 11.37 + seed) * 0.35;
+      float trailStart = max(0.0, progress - trailLen);
+      
+      // Find minimum distance to arc by checking line segments
+      float minDist = 1000.0;
+      float closestS = 0.0;
+      
+      vec2 prevPos = vec2(ARC_POS(trailStart).x * uAspect, ARC_POS(trailStart).y);
+      float prevS = trailStart;
+      
+      // Check distance to line segments along the arc
+      for (float i = 1.0; i <= 16.0; i++) {
+        float s = trailStart + (progress - trailStart) * (i / 16.0);
+        vec2 arcPos = ARC_POS(s);
+        vec2 currPos = vec2(arcPos.x * uAspect, arcPos.y);
+        
+        // Distance to this segment
+        vec2 ab = currPos - prevPos;
+        vec2 ap = uvCorrected - prevPos;
+        float tSeg = clamp(dot(ap, ab) / dot(ab, ab), 0.0, 1.0);
+        float d = length(ap - ab * tSeg);
+        
+        if (d < minDist) {
+          minDist = d;
+          closestS = prevS + (s - prevS) * tSeg;
+        }
+        
+        prevPos = currPos;
+        prevS = s;
+      }
+      
+      // How far along trail (0 = tail, 1 = head)
+      float trailProgress = (closestS - trailStart) / max(0.001, progress - trailStart);
+      
+      // Trail width (narrower toward tail) - size varies from 1/3 to full
+      float baseWidth = 0.00067 + hash1(meteorIdx * 13.59 + seed) * 0.00133;
+      float trailWidth = baseWidth * (0.2 + 0.8 * trailProgress);
+      
+      // Brightness based on distance from arc
+      float brightness = smoothstep(trailWidth * 2.0, trailWidth * 0.1, minDist);
+      
+      // Fade toward tail
+      brightness *= trailProgress * trailProgress;
+      
+      // Head glow
+      vec2 headCorrected = vec2(headPos.x * uAspect, headPos.y);
+      float headDist = length(uvCorrected - headCorrected);
+      float headGlow = exp(-headDist * 200.0) * 1.5;
+      
+      // Fade in at start, fade out at end
+      float lifeFade = smoothstep(0.0, 0.1, progress) * smoothstep(1.0, 0.75, progress);
+      
+      // Fade out near horizon (both based on head position and pixel position)
+      float horizonFadeHead = smoothstep(0.45, 0.65, headPos.y);
+      float horizonFadePixel = smoothstep(0.40, 0.55, uv.y);
+      float horizonFade = horizonFadeHead * horizonFadePixel;
+      
+      return (brightness * 0.7 + headGlow) * lifeFade * horizonFade;
+    }
+    
     void main() {
       vec3 topColor = vec3(0.08, 0.07, 0.065);
       vec3 bottomColor = vec3(0.14, 0.13, 0.12);
       vec3 color = mix(bottomColor, topColor, vUv.y);
+      
+      // Add stars - only in upper portion of sky (above horizon)
+      if (vUv.y > 0.35) {
+        // Grid: more cells = more stars
+        float gridX = 18.0;
+        float gridY = 13.0;
+        
+        vec2 cellId = floor(vec2(vUv.x * gridX, vUv.y * gridY));
+        vec2 cellUv = fract(vec2(vUv.x * gridX, vUv.y * gridY));
+        
+        // Cell aspect ratio for circular stars
+        float cellAspect = (uAspect / gridX) / (1.0 / gridY);
+        
+        float s = star(cellUv, cellId, cellAspect);
+        
+        // Fade stars near horizon
+        float horizonFade = smoothstep(0.35, 0.5, vUv.y);
+        
+        // Star color - slightly warm white, brighter
+        vec3 starColor = vec3(1.0, 0.97, 0.9);
+        
+        color += starColor * s * horizonFade;
+      }
+      
+      // Add shooting stars - rendered separately so they can fade smoothly to horizon
+      // 2 meteors with ~60s cycles = roughly 1 per minute on average
+      float meteor = 0.0;
+      for (float i = 0.0; i < 2.0; i++) {
+        meteor += shootingStar(vUv, i);
+      }
+      
+      // Shooting star color - subtle gray like the stars
+      vec3 meteorColor = vec3(0.85, 0.83, 0.8);
+      
+      color += meteorColor * meteor;
+      
       gl_FragColor = vec4(color, 1.0);
     }
   `;
@@ -911,6 +1111,8 @@
     const bgPos = gl.getAttribLocation(bgProgram, 'a_position');
     gl.enableVertexAttribArray(bgPos);
     gl.vertexAttribPointer(bgPos, 2, gl.FLOAT, false, 0, 0);
+    gl.uniform1f(gl.getUniformLocation(bgProgram, 'uTime'), t);
+    gl.uniform1f(gl.getUniformLocation(bgProgram, 'uAspect'), aspect);
     gl.depthMask(false);
     gl.drawArrays(gl.TRIANGLES, 0, 6);
     gl.depthMask(true);
