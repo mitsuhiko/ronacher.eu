@@ -1,6 +1,12 @@
 (function() {
   const canvas = document.getElementById('ocean-canvas');
   const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+  
+  // Start fade from black to horizon gray
+  requestAnimationFrame(() => {
+    document.body.classList.add('fade-bg');
+  });
+  
   if (!gl) return;
 
   let aspect = 1;
@@ -724,6 +730,15 @@
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.REPEAT);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    
+    // Fade in the WebGL canvas
+    canvas.classList.add('visible');
+    
+    // Fade in the card 100ms after canvas starts fading
+    setTimeout(() => {
+      const cardContainer = document.querySelector('.card-container');
+      if (cardContainer) cardContainer.classList.add('visible');
+    }, 100);
   };
   image.src = './water.png';
 

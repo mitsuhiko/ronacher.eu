@@ -2,9 +2,14 @@ html,
 body {
   margin: 0;
   padding: 0;
-  background: #2a2725;
+  background: #000;
   overscroll-behavior-y: none;
   overflow: hidden;
+  transition: background 1.6s ease-out;
+}
+
+body.fade-bg {
+  background: #1c1b19;
 }
 
 #ocean-canvas {
@@ -14,6 +19,12 @@ body {
   width: 100%;
   height: 100%;
   z-index: 0;
+  opacity: 0;
+  transition: opacity 2s ease-out;
+}
+
+#ocean-canvas.visible {
+  opacity: 1;
 }
 
 body {
@@ -41,6 +52,12 @@ main {
   aspect-ratio: var(--card-ar-w) / var(--card-ar-h);
   cursor: pointer;
   perspective: 2000px;
+  opacity: 0;
+  transition: opacity 1.2s ease-out;
+}
+
+.card-container.visible {
+  opacity: 1;
 }
 
 .card {
