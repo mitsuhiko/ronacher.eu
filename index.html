@@ -303,21 +303,94 @@
     }
   `;
 
-  const oceanFragmentSource = `
-    precision highp float;
-    varying vec2 vUv;
-    varying float vHeight;
-    varying vec3 vWorldPos;
-    uniform sampler2D uMap;
-    uniform float uTime;
+    const oceanFragmentSource = `
+      precision highp float;
+      varying vec2 vUv;
+      varying float vHeight;
+      varying vec3 vWorldPos;
+      uniform sampler2D uMap;
+      uniform float uTime;
+      uniform vec3 uLightPos;
+      uniform vec3 uBarrelCenter;
+      uniform float uBarrelRadius;
+      uniform float uBarrelHalfHeight;
+      uniform float uShadowDebug;
 
-    const vec3 uColor = vec3(0.165, 0.153, 0.145);
-    const vec3 uLightColor = vec3(0.28, 0.25, 0.22);
-    const vec3 uDarkColor = vec3(0.11, 0.10, 0.09);
-    const vec3 uFogColor = vec3(0.11, 0.10, 0.09);
+      const vec3 uColor = vec3(0.165, 0.153, 0.145);
+      const vec3 uLightColor = vec3(0.28, 0.25, 0.22);
+      const vec3 uDarkColor = vec3(0.11, 0.10, 0.09);
+      const vec3 uFogColor = vec3(0.11, 0.10, 0.09);
 
-    void main() {
-      vec2 uv = vUv * 20.0 + vec2(uTime * -0.05);
+      #define SCALE 10.0
+
+      float calculateSurface(float x, float z) {
+        float y = 0.0;
+        y += (sin(x * 1.0 / SCALE + uTime * 0.5) + sin(x * 2.3 / SCALE + uTime * 0.75) + sin(x * 3.3 / SCALE + uTime * 0.2)) / 3.0;
+        y += (sin(z * 0.2 / SCALE + uTime * 0.9) + sin(z * 1.8 / SCALE + uTime * 0.9) + sin(z * 2.8 / SCALE + uTime * 0.4)) / 3.0;
+        return y;
+      }
+
+      float waveHeightAt(vec2 xz) {
+        float base = calculateSurface(0.0, 0.0);
+        float distFromCenter = length(xz) / 400.0;
+        float strength = 1.5 * (1.0 - smoothstep(0.0, 1.0, distFromCenter));
+        return strength * (calculateSurface(xz.x, xz.y) - base);
+      }
+
+      float waveHeightAtWithBase(vec2 xz, float base) {
+        float distFromCenter = length(xz) / 400.0;
+        float strength = 1.5 * (1.0 - smoothstep(0.0, 1.0, distFromCenter));
+        return strength * (calculateSurface(xz.x, xz.y) - base);
+      }
+
+      float barrelShadowAt(vec3 worldPos) {
+        vec3 lightDir = normalize(uLightPos - uBarrelCenter);
+        float lenXZ = length(lightDir.xz);
+        if (lightDir.y <= 0.001 || lenXZ <= 0.001) return 0.0;
+
+        vec2 shadowDir = normalize(-lightDir.xz);
+        vec2 perpDir = vec2(-shadowDir.y, shadowDir.x);
+
+        vec2 delta = worldPos.xz - uBarrelCenter.xz;
+        float s = dot(delta, shadowDir);
+        float t = dot(delta, perpDir);
+
+        float topY = uBarrelCenter.y + uBarrelHalfHeight;
+        float maxS = (topY - worldPos.y) * (lenXZ / max(lightDir.y, 0.001));
+        maxS *= 4.0;
+        if (maxS <= 0.0) return 0.0;
+
+        float forwardMask = step(0.0, s);
+        float lengthMask = 1.0 - smoothstep(maxS * 0.75, maxS, s);
+        float startFade = smoothstep(0.0, 0.9, s);
+
+        float width = uBarrelRadius * 1.15 + s * 0.10;
+        float core = 1.0 - smoothstep(width, width + 2.0, abs(t));
+
+        return core * forwardMask * lengthMask * startFade;
+      }
+
+      float waveShadowAt(vec3 worldPos) {
+        vec3 lightDir = normalize(uLightPos - worldPos);
+        float lenXZ = length(lightDir.xz);
+        if (lightDir.y <= 0.001 || lenXZ <= 0.001) return 0.0;
+
+        vec2 dirXZ = lightDir.xz / lenXZ;
+        float occlusion = 0.0;
+        float base = calculateSurface(0.0, 0.0);
+        const float stepDist = 10.0;
+        for (int i = 1; i <= 6; i++) {
+          float d = float(i) * stepDist;
+          vec2 sampleXZ = worldPos.xz + dirXZ * d;
+          float sampleY = waveHeightAtWithBase(sampleXZ, base);
+          float lineY = worldPos.y + (d * lightDir.y / lenXZ);
+          occlusion = max(occlusion, smoothstep(0.02, 0.22, sampleY - lineY));
+        }
+        return occlusion;
+      }
+
+      void main() {
+        vec2 uv = vUv * 20.0 + vec2(uTime * -0.05);
 
       uv.y += 0.01 * (sin(uv.x * 3.5 + uTime * 0.35) + sin(uv.x * 4.8 + uTime * 1.05) + sin(uv.x * 7.3 + uTime * 0.45)) / 3.0;
       uv.x += 0.12 * (sin(uv.y * 4.0 + uTime * 0.5) + sin(uv.y * 6.8 + uTime * 0.75) + sin(uv.y * 11.3 + uTime * 0.2)) / 3.0;
@@ -326,18 +399,28 @@
       vec4 tex1 = texture2D(uMap, uv);
       vec4 tex2 = texture2D(uMap, uv + vec2(0.2));
 
-      vec3 color = uColor;
-      color += uLightColor * tex1.a * 0.7;
-      color -= uDarkColor * tex2.a * 0.3;
-      color += vec3(0.02) * vHeight;
+        vec3 color = uColor;
+        color += uLightColor * tex1.a * 0.7;
+        color -= uDarkColor * tex2.a * 0.3;
+        color += vec3(0.02) * vHeight;
 
-      // Radial fog - fade edges and distance
-      float distZ = -vWorldPos.z;
-      float distX = abs(vWorldPos.x);
-      float fogZ = smoothstep(30.0, 350.0, distZ);
-      float fogX = smoothstep(150.0, 350.0, distX);
-      float fog = max(fogZ, fogX);
-      color = mix(color, uFogColor, fog);
+        float barrelShadow = barrelShadowAt(vWorldPos);
+        float waveShadow = waveShadowAt(vWorldPos);
+        if (uShadowDebug > 0.5) {
+          float m = clamp(barrelShadow + 0.7 * waveShadow, 0.0, 1.0);
+          gl_FragColor = vec4(vec3(m), 1.0);
+          return;
+        }
+        float shade = 1.0 - 0.45 * barrelShadow - 0.22 * waveShadow;
+        color *= clamp(shade, 0.35, 1.0);
+
+        // Radial fog - fade edges and distance
+        float distZ = -vWorldPos.z;
+        float distX = abs(vWorldPos.x);
+        float fogZ = smoothstep(30.0, 350.0, distZ);
+        float fogX = smoothstep(150.0, 350.0, distX);
+        float fog = max(fogZ, fogX);
+        color = mix(color, uFogColor, fog);
 
       gl_FragColor = vec4(color, 1.0);
     }
@@ -441,16 +524,18 @@
     }
   `;
 
-  const barrelFragmentSource = `
-    precision highp float;
-    varying vec3 vNormal;
-    varying vec3 vWorldPos;
-    varying float vY;
+    const barrelFragmentSource = `
+      precision highp float;
+      varying vec3 vNormal;
+      varying vec3 vWorldPos;
+      varying float vY;
+      uniform vec3 uLightPos;
+      uniform vec3 uCameraPos;
 
-    void main() {
-      vec3 normal = normalize(vNormal);
-      vec3 lightDir = normalize(vec3(0.5, 1.0, 0.8));
-      float NdotL = dot(normal, lightDir);
+      void main() {
+        vec3 normal = normalize(vNormal);
+        vec3 lightDir = normalize(uLightPos - vWorldPos);
+        float NdotL = dot(normal, lightDir);
       
       // Detect top/bottom caps by normal direction
       float isTopCap = step(0.8, normal.y);
@@ -499,12 +584,12 @@
         else if (toon > 0.6) color = woodMid;
         else color = woodDark;
       }
-      
-      // Subtle rim highlight for that Wind Waker glow
-      vec3 viewDir = normalize(vec3(0.0, 8.0, 45.0) - vWorldPos);
-      float rim = 1.0 - max(dot(viewDir, normal), 0.0);
-      rim = smoothstep(0.6, 1.0, rim);
-      color += vec3(0.15, 0.12, 0.08) * rim;
+        
+        // Subtle rim highlight for that Wind Waker glow
+        vec3 viewDir = normalize(uCameraPos - vWorldPos);
+        float rim = 1.0 - max(dot(viewDir, normal), 0.0);
+        rim = smoothstep(0.6, 1.0, rim);
+        color += vec3(0.15, 0.12, 0.08) * rim;
       
       gl_FragColor = vec4(color, 1.0);
     }
@@ -709,11 +794,15 @@
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, barrelIndexBuffer);
   gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(barrelIndices), gl.STATIC_DRAW);
   
-  // Barrel position will be calculated from screen coordinates
-  const barrelPos = [0, 0, 0];
-  
-  // Unproject screen coords to world position on ocean plane (y=0)
-  function screenToWorld(screenX, screenY, projMatrix, viewMat) {
+    // Barrel position will be calculated from screen coordinates
+    const barrelPos = [0, 0, 0];
+    const barrelCenter = [0, 0, 0];
+    const cameraEye = [0, 8, 45];
+    const cameraTarget = [0, -2, -100];
+    const lightPos = [35, 30, 60];
+    
+    // Unproject screen coords to world position on ocean plane (y=0)
+    function screenToWorld(screenX, screenY, projMatrix, viewMat) {
     // Convert screen coords to NDC (-1 to 1)
     const ndcX = screenX * 2 - 1;
     const ndcY = 1 - screenY * 2;
@@ -728,12 +817,10 @@
       0, 0, -1, (800 + 0.1) / (2 * 800 * 0.1)
     ];
     
-    // Camera position and direction from view matrix
-    const eye = [0, 8, 45];
-    const target = [0, -2, -100];
-    const forward = normalize([target[0] - eye[0], target[1] - eye[1], target[2] - eye[2]]);
-    const right = normalize(cross([0, 1, 0], [-forward[0], -forward[1], -forward[2]]));
-    const up = cross([-forward[0], -forward[1], -forward[2]], right);
+      // Camera position and direction from view matrix
+      const forward = normalize([cameraTarget[0] - cameraEye[0], cameraTarget[1] - cameraEye[1], cameraTarget[2] - cameraEye[2]]);
+      const right = normalize(cross([0, 1, 0], [-forward[0], -forward[1], -forward[2]]));
+      const up = cross([-forward[0], -forward[1], -forward[2]], right);
     
     // Calculate ray direction in world space
     const fovTan = Math.tan(Math.PI / 8);
@@ -742,11 +829,11 @@
     const rayZ = right[2] * ndcX * fovTan * aspect + up[2] * ndcY * fovTan + forward[2];
     const rayDir = normalize([rayX, rayY, rayZ]);
     
-    // Intersect ray with y=0 plane
-    if (Math.abs(rayDir[1]) < 0.001) return [eye[0], 0, eye[2]];
-    const t = -eye[1] / rayDir[1];
-    return [eye[0] + rayDir[0] * t, 0, eye[2] + rayDir[2] * t];
-  }
+      // Intersect ray with y=0 plane
+      if (Math.abs(rayDir[1]) < 0.001) return [cameraEye[0], 0, cameraEye[2]];
+      const t = -cameraEye[1] / rayDir[1];
+      return [cameraEye[0] + rayDir[0] * t, 0, cameraEye[2] + rayDir[2] * t];
+    }
 
   // Load texture with mipmapping
   const texture = gl.createTexture();
@@ -798,19 +885,46 @@
     return a[0]*b[0] + a[1]*b[1] + a[2]*b[2];
   }
 
-  const viewMatrix = lookAt([0, 8, 45], [0, -2, -100], [0, 1, 0]);
+    function calculateSurfaceJS(x, z, t) {
+      const SCALE = 10.0;
+      let y = 0;
+      y += (Math.sin(x * 1.0 / SCALE + t * 0.5) + Math.sin(x * 2.3 / SCALE + t * 0.75) + Math.sin(x * 3.3 / SCALE + t * 0.2)) / 3.0;
+      y += (Math.sin(z * 0.2 / SCALE + t * 0.9) + Math.sin(z * 1.8 / SCALE + t * 0.9) + Math.sin(z * 2.8 / SCALE + t * 0.4)) / 3.0;
+      return y;
+    }
 
-  function render(time) {
+    function barrelWaveHeightAt(x, z, t) {
+      return 1.5 * calculateSurfaceJS(x, z, t) - 1.5 * calculateSurfaceJS(0.0, 0.0, t);
+    }
+
+    const viewMatrix = lookAt(cameraEye, cameraTarget, [0, 1, 0]);
+    let debugShadows = false;
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 's') debugShadows = !debugShadows;
+    });
+
+    function render(time) {
     const t = time * 0.001;
     gl.clearColor(0, 0, 0, 1);
     gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
     gl.enable(gl.DEPTH_TEST);
 
-    // Update projection for aspect - far plane at 800 for horizon
-    const proj = perspective(Math.PI / 4, aspect, 0.1, 800);
+      // Update projection for aspect - far plane at 800 for horizon
+      const proj = perspective(Math.PI / 4, aspect, 0.1, 800);
 
-    // Draw background
-    gl.useProgram(bgProgram);
+      // Calculate barrel position from screen coords (85% from left, 85% from top = bottom-right with 15% margin)
+      const worldPos = screenToWorld(0.85, 0.85, proj, viewMatrix);
+      barrelPos[0] = worldPos[0];
+      barrelPos[1] = worldPos[1];
+      barrelPos[2] = worldPos[2];
+
+      const barrelWaveHeight = barrelWaveHeightAt(barrelPos[0], barrelPos[2], t);
+      barrelCenter[0] = barrelPos[0];
+      barrelCenter[1] = barrelWaveHeight - 0.8 + 1.12;
+      barrelCenter[2] = barrelPos[2];
+
+      // Draw background
+      gl.useProgram(bgProgram);
     gl.bindBuffer(gl.ARRAY_BUFFER, bgBuffer);
     const bgPos = gl.getAttribLocation(bgProgram, 'a_position');
     gl.enableVertexAttribArray(bgPos);
@@ -832,9 +946,14 @@
     gl.enableVertexAttribArray(uvLoc);
     gl.vertexAttribPointer(uvLoc, 2, gl.FLOAT, false, 0, 0);
 
-    gl.uniformMatrix4fv(gl.getUniformLocation(oceanProgram, 'uProjection'), false, proj);
-    gl.uniformMatrix4fv(gl.getUniformLocation(oceanProgram, 'uView'), false, viewMatrix);
-    gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uTime'), t);
+      gl.uniformMatrix4fv(gl.getUniformLocation(oceanProgram, 'uProjection'), false, proj);
+      gl.uniformMatrix4fv(gl.getUniformLocation(oceanProgram, 'uView'), false, viewMatrix);
+      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uTime'), t);
+      gl.uniform3fv(gl.getUniformLocation(oceanProgram, 'uLightPos'), lightPos);
+      gl.uniform3fv(gl.getUniformLocation(oceanProgram, 'uBarrelCenter'), barrelCenter);
+      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uBarrelRadius'), 0.9);
+      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uBarrelHalfHeight'), 1.12);
+      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uShadowDebug'), debugShadows ? 1.0 : 0.0);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
@@ -856,19 +975,15 @@
     gl.enableVertexAttribArray(barrelNormLoc);
     gl.vertexAttribPointer(barrelNormLoc, 3, gl.FLOAT, false, 0, 0);
 
-    // Calculate barrel position from screen coords (85% from left, 85% from top = bottom-right with 15% margin)
-    const worldPos = screenToWorld(0.85, 0.85, proj, viewMatrix);
-    barrelPos[0] = worldPos[0];
-    barrelPos[1] = worldPos[1];
-    barrelPos[2] = worldPos[2];
+      gl.uniformMatrix4fv(gl.getUniformLocation(barrelProgram, 'uProjection'), false, proj);
+      gl.uniformMatrix4fv(gl.getUniformLocation(barrelProgram, 'uView'), false, viewMatrix);
+      gl.uniform1f(gl.getUniformLocation(barrelProgram, 'uTime'), t);
+      gl.uniform3fv(gl.getUniformLocation(barrelProgram, 'uBarrelPos'), barrelPos);
+      gl.uniform3fv(gl.getUniformLocation(barrelProgram, 'uLightPos'), lightPos);
+      gl.uniform3fv(gl.getUniformLocation(barrelProgram, 'uCameraPos'), cameraEye);
 
-    gl.uniformMatrix4fv(gl.getUniformLocation(barrelProgram, 'uProjection'), false, proj);
-    gl.uniformMatrix4fv(gl.getUniformLocation(barrelProgram, 'uView'), false, viewMatrix);
-    gl.uniform1f(gl.getUniformLocation(barrelProgram, 'uTime'), t);
-    gl.uniform3fv(gl.getUniformLocation(barrelProgram, 'uBarrelPos'), barrelPos);
-
-    gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, barrelIndexBuffer);
-    gl.drawElements(gl.TRIANGLES, barrelIndices.length, gl.UNSIGNED_SHORT, 0);
+      gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, barrelIndexBuffer);
+      gl.drawElements(gl.TRIANGLES, barrelIndices.length, gl.UNSIGNED_SHORT, 0);
 
     requestAnimationFrame(render);
   }
