@@ -13,19 +13,18 @@
 <canvas id="ocean-canvas"></canvas>
 <script src="ocean.js"></script>
 <main>
-  <div class="card-container" onclick="if(event.target.tagName!=='A'){this.classList.toggle('flipped');if(this.classList.contains('flipped')){const s=this.querySelector('.card-back-content');if(s)s.scrollTop=0;}}">
-    <div class="card">
-      <div class="card-face card-front">
-        <div class="card-front-content">
-          <img src="avatar-large.jpg" alt="" class="avatar">
-          <h1>Armin Ronacher</h1>
-          <p class="tagline">Building Teams, Software and Products</p>
-        </div>
-        <div class="hint">learn more ↓</div>
-      </div>
-      <div class="card-face card-back">
+  <div class="card-container" onclick="if(event.target.tagName!=='A'){this.classList.toggle('expanded');}">
+    <div class="card-front">
+      <img src="avatar-large.jpg" alt="" class="avatar">
+      <h1>Armin Ronacher</h1>
+      <p class="tagline">Building Teams, Software and Products</p>
+      <div class="hint">learn more ↓</div>
+    </div>
+    <div class="card-back">
+      <div class="card-back-inner">
+        <img src="avatar-large.jpg" alt="" class="avatar">
+        <h1>Armin Ronacher</h1>
         <div class="card-back-content">
-          <h1>Armin Ronacher</h1>
           <p>
             I build teams and software — particularly Open Source software.
             You might know me as creator of <a href="https://flask.palletsprojects.com/">Flask</a> or
@@ -46,8 +45,8 @@
             <li>Or <a href="mailto:armin.ronacher@active-4.com">send me an email</a></li>
             <li>Or <a href="https://lucumr.pocoo.org/about/">learn more about me</a></li>
           </ul>
+          <div class="hint">click to collapse ↑</div>
         </div>
-        <div class="hint">enough about me ↑</div>
       </div>
     </div>
   </div>

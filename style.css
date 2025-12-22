@@ -44,52 +44,36 @@ main {
 }
 
 .card-container {
-  --card-ar-w: 7;
-  --card-ar-h: 4;
-  --card-max-h: 60vh;
-  --card-max-vw: 80vw;
-  width: min(840px, var(--card-max-vw), calc(var(--card-max-h) * var(--card-ar-w) / var(--card-ar-h)));
-  aspect-ratio: var(--card-ar-w) / var(--card-ar-h);
   cursor: pointer;
-  perspective: 2000px;
   opacity: 0;
   transition: opacity 1.2s ease-out;
+  position: relative;
 }
 
 .card-container.visible {
   opacity: 1;
 }
 
-.card {
-  position: relative;
-  width: 100%;
-  height: 100%;
-  transform-style: preserve-3d;
-  transition: transform 0.6s ease-in-out;
-  font-size: clamp(0.85rem, 0.6rem + 0.85vw, 1.3rem);
-}
-
-.card-container.flipped .card {
-  transform: rotateX(180deg);
-}
-
-.card-face {
-  position: absolute;
-  width: 100%;
-  height: 100%;
-  backface-visibility: hidden;
-  background-color: #f8f6f3;
+/* Front card - always visible, compact */
+.card-front {
+  background-color: rgba(248, 246, 243, 0.85);
   border-radius: 8px;
   box-shadow:
     0 4px 8px rgba(0, 0, 0, 0.2),
     0 16px 48px rgba(0, 0, 0, 0.4);
   border: 1px solid rgba(0, 0, 0, 0.08);
   color: #3a3530;
-  box-sizing: border-box;
-  overflow: hidden;
+  padding: 1.8em 2.5em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  position: relative;
+  z-index: 2;
+  transition: opacity 0.4s ease, transform 0.4s ease;
 }
 
-.card-face::before {
+.card-front::before {
   content: '';
   position: absolute;
   top: 0;
@@ -101,72 +85,107 @@ main {
   border-radius: 8px;
 }
 
-.card-front {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: clamp(1.4em, 3vw, 2.3em);
-  background-color: rgba(248, 246, 243, 0.7);
-}
-
-.card-front-content {
-  text-align: center;
+.card-container.expanded .card-front {
+  opacity: 0;
+  transform: scale(0.95);
+  pointer-events: none;
 }
 
 .card-front img.avatar {
-  width: clamp(72px, 16vw, 150px);
-  height: clamp(72px, 16vw, 150px);
+  width: 90px;
+  height: 90px;
   border-radius: 50%;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
-  margin-bottom: 1.2em;
+  margin-bottom: 0.7em;
 }
 
 .card-front h1 {
   font-weight: 600;
-  font-size: 2.3em;
+  font-size: 1.6rem;
   color: #996515;
-  margin: 0 0 0.4em 0;
+  margin: 0 0 0.25em 0;
 }
 
 .card-front .tagline {
-  font-size: 1.08em;
+  font-size: 0.95rem;
   color: #5a554f;
   margin: 0;
   font-style: italic;
 }
 
 .card-front .hint {
-  position: absolute;
-  bottom: 1.2em;
-  left: 0;
-  right: 0;
-  text-align: center;
-  font-size: 0.7em;
+  margin-top: 1.2em;
+  font-size: 0.75rem;
   color: #a09890;
   letter-spacing: 0.05em;
 }
 
+/* Back card - expands from center */
 .card-back {
-  transform: rotateX(180deg);
-  padding: clamp(1.2em, 2.6vw, 1.9em) clamp(1.4em, 3vw, 2.3em);
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%) scale(0.8);
+  width: min(840px, 85vw);
+  background-color: rgba(248, 246, 243, 0.9);
+  border-radius: 8px;
+  box-shadow:
+    0 4px 8px rgba(0, 0, 0, 0.2),
+    0 16px 48px rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(0, 0, 0, 0.08);
+  color: #3a3530;
+  padding: clamp(1.5em, 3vw, 2.2em);
+  font-size: clamp(0.85rem, 0.6rem + 0.85vw, 1.3rem);
+  opacity: 0;
+  pointer-events: none;
+  z-index: 1;
+  transition: opacity 0.4s ease, transform 0.4s ease;
+}
+
+.card-back::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: linear-gradient(135deg, rgba(255, 255, 255, 0.15) 0%, transparent 50%, rgba(0, 0, 0, 0.03) 100%);
+  pointer-events: none;
+  border-radius: 8px;
+}
+
+.card-container.expanded .card-back {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1);
+  pointer-events: auto;
+  z-index: 3;
+}
+
+.card-back-inner {
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  align-items: center;
+  text-align: center;
+}
+
+.card-back-inner img.avatar {
+  width: 70px;
+  height: 70px;
+  border-radius: 50%;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.2);
+  margin-bottom: 0.5em;
+}
+
+.card-back-inner > h1 {
+  font-weight: 600;
+  font-size: 1.5em;
+  color: #996515;
+  margin: 0 0 0.6em 0;
 }
 
 .card-back-content {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  overflow: visible;
-}
-
-.card-back h1 {
-  font-weight: 600;
-  font-size: 1.9em;
-  color: #996515;
-  margin: 0 0 0.8em 0;
+  text-align: left;
+  width: 100%;
 }
 
 .card-back p {
@@ -189,7 +208,7 @@ main {
 .card-back a {
   color: #996515;
   text-decoration: none;
-  transition: all 0.2s ease;
+  transition: color 0.2s ease, background 0.2s ease;
   padding: 2px 6px;
   margin: -2px -6px;
   border-radius: 4px;
@@ -202,28 +221,21 @@ main {
 }
 
 .card-back .hint {
-  margin-top: 0.9em;
+  margin-top: 1em;
   text-align: center;
   font-size: 0.7em;
   color: #a09890;
   letter-spacing: 0.05em;
 }
 
-@media only screen and (max-height: 760px) {
-  .card-back-content {
-    justify-content: flex-start;
-    overflow: auto;
-    overscroll-behavior: contain;
-    -webkit-overflow-scrolling: touch;
-    scrollbar-width: thin;
+@media only screen and (max-width: 600px) {
+  .card-back ul {
+    column-count: 1;
   }
 }
 
 @media only screen and (max-aspect-ratio: 3 / 4) and (max-width: 1100px) {
-  /* In small portrait layouts, make the card a bit taller (but never > 80% as tall as it is wide). */
-  .card-container {
-    --card-ar-w: 5;
-    --card-ar-h: 4;
-    --card-max-vw: 88vw;
+  .card-back {
+    width: min(840px, 88vw);
   }
 }
