@@ -387,6 +387,42 @@
       varying float vY;
       uniform vec3 uLightDir;
       uniform vec3 uCameraPos;
+      uniform float uTime;
+
+      #define SCALE 10.0
+
+      float calculateSurface(float x, float z) {
+        float y = 0.0;
+        y += (sin(x * 1.0 / SCALE + uTime * 0.5) + sin(x * 2.3 / SCALE + uTime * 0.75) + sin(x * 3.3 / SCALE + uTime * 0.2)) / 3.0;
+        y += (sin(z * 0.2 / SCALE + uTime * 0.9) + sin(z * 1.8 / SCALE + uTime * 0.9) + sin(z * 2.8 / SCALE + uTime * 0.4)) / 3.0;
+        return y;
+      }
+
+      float waveHeightAt(vec2 xz) {
+        float base = calculateSurface(0.0, 0.0);
+        float distFromCenter = length(xz) / 400.0;
+        float strength = 1.5 * (1.0 - smoothstep(0.0, 1.0, distFromCenter));
+        return strength * (calculateSurface(xz.x, xz.y) - base);
+      }
+
+      // Check if waves cast shadow on this barrel fragment
+      float waveShadowOnBarrel(vec3 worldPos) {
+        vec3 lightDir = normalize(uLightDir);
+        vec2 lightXZ = normalize(lightDir.xz);
+        
+        // Sample wave heights to get slope toward light
+        float eps = 2.0;
+        float hToward = waveHeightAt(worldPos.xz + lightXZ * eps);
+        float hAway = waveHeightAt(worldPos.xz - lightXZ * eps);
+        
+        // Slope toward light (positive = wave rises toward light = we're in shadow)
+        float slope = (hToward - hAway) / (2.0 * eps);
+        
+        // Smooth threshold for shadow
+        float shadow = smoothstep(-0.02, 0.06, slope);
+        
+        return shadow;
+      }
 
       void main() {
         vec3 normal = normalize(vNormal);
@@ -398,8 +434,13 @@
       float isBottomCap = step(0.8, -normal.y);
       float isCap = max(isTopCap, isBottomCap);
       
+      // Check if waves are casting shadow onto this fragment
+      float waveShadow = waveShadowOnBarrel(vWorldPos);
+      
       // Add fill light for caps so they're not in shadow
-      float fillNdotL = NdotL + isCap * 0.5;
+      // Subtract wave shadow to push into darker toon levels
+      // Strong effect so shadow bands are clearly visible
+      float fillNdotL = NdotL + isCap * 0.5 - waveShadow * 2.5;
       
       // Wind Waker style cel shading - hard cutoffs for 3 tones
       float toon;
@@ -441,11 +482,11 @@
         else color = woodDark;
       }
         
-        // Subtle rim highlight for that Wind Waker glow
+        // Subtle rim highlight for that Wind Waker glow (reduced when in wave shadow)
         vec3 viewDir = normalize(uCameraPos - vWorldPos);
         float rim = 1.0 - max(dot(viewDir, normal), 0.0);
         rim = smoothstep(0.6, 1.0, rim);
-        color += vec3(0.15, 0.12, 0.08) * rim;
+        color += vec3(0.15, 0.12, 0.08) * rim * (1.0 - waveShadow);
       
       gl_FragColor = vec4(color, 1.0);
     }
