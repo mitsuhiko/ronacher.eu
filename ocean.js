@@ -83,7 +83,7 @@
       varying vec3 vWorldPos;
       uniform sampler2D uMap;
       uniform float uTime;
-      uniform vec3 uLightPos;
+      uniform vec3 uLightDir;
       uniform vec3 uBarrelCenter;
       uniform float uBarrelRadius;
       uniform float uBarrelHalfHeight;
@@ -125,7 +125,7 @@
       }
 
       float barrelShadowAt(vec3 worldPos) {
-        vec3 lightDir = normalize(uLightPos - uBarrelCenter);
+        vec3 lightDir = normalize(uLightDir);
         float lenXZ = length(lightDir.xz);
         if (lightDir.y <= 0.001 || lenXZ <= 0.001) return 0.0;
 
@@ -152,8 +152,8 @@
       }
 
       float waveShadowAt(vec3 worldPos) {
-        // Use consistent light direction for entire ocean (treat as directional light)
-        vec3 lightDir = normalize(uLightPos);
+        // Use consistent light direction for entire ocean (directional light)
+        vec3 lightDir = normalize(uLightDir);
         vec2 lightXZ = normalize(lightDir.xz);
         
         // Sample wave height gradient toward light
@@ -161,11 +161,12 @@
         float hTowardLight = waveHeightAt(worldPos.xz + lightXZ * eps);
         float hAwayFromLight = waveHeightAt(worldPos.xz - lightXZ * eps);
         
-        // Slope toward light (positive = lit face, negative = back face in shadow)
+        // Slope toward light (positive = rising toward light)
         float slope = (hTowardLight - hAwayFromLight) / (2.0 * eps);
         
-        // Shadow on back side of waves
-        float shadow = smoothstep(0.04, -0.06, slope);
+        // For a heightfield, faces that rise toward the light point away from it
+        // (normal ~ (-∇h, 1)), so positive slope means "back-facing" and should darken.
+        float shadow = smoothstep(-0.06, 0.04, slope);
         return shadow;
       }
 
@@ -217,6 +218,18 @@
       vec4 tex1 = texture2D(uMap, uv);
       vec4 tex2 = texture2D(uMap, uv + vec2(0.2));
 
+        vec3 lightDir = normalize(uLightDir);
+        float base = calculateSurface(0.0, 0.0);
+        float nEps = 2.0;
+        float hx1 = waveHeightAtWithBase(vWorldPos.xz + vec2(nEps, 0.0), base);
+        float hx0 = waveHeightAtWithBase(vWorldPos.xz - vec2(nEps, 0.0), base);
+        float hz1 = waveHeightAtWithBase(vWorldPos.xz + vec2(0.0, nEps), base);
+        float hz0 = waveHeightAtWithBase(vWorldPos.xz - vec2(0.0, nEps), base);
+        float dHdX = (hx1 - hx0) / (2.0 * nEps);
+        float dHdZ = (hz1 - hz0) / (2.0 * nEps);
+        vec3 waveNormal = normalize(vec3(-dHdX, 1.0, -dHdZ));
+        float NdotL = clamp(dot(waveNormal, lightDir), 0.0, 1.0);
+
         vec3 color = uColor;
         color += uLightColor * tex1.a * 0.7;
         color -= uDarkColor * tex2.a * 0.3;
@@ -233,7 +246,10 @@
         color *= clamp(shade, 0.35, 1.0);
 
         float ripples = rippleAt(vWorldPos.xz);
-        color += uLightColor * (ripples * uRippleStrength);
+        color += uLightColor * (ripples * uRippleStrength) * (0.35 + 0.65 * NdotL);
+
+        // Directional diffuse lighting so highlights track the sun direction.
+        color *= mix(0.78, 1.10, NdotL);
 
         // Radial fog - fade edges and distance
         float distZ = -vWorldPos.z;
@@ -350,12 +366,12 @@
       varying vec3 vNormal;
       varying vec3 vWorldPos;
       varying float vY;
-      uniform vec3 uLightPos;
+      uniform vec3 uLightDir;
       uniform vec3 uCameraPos;
 
       void main() {
         vec3 normal = normalize(vNormal);
-        vec3 lightDir = normalize(uLightPos - vWorldPos);
+        vec3 lightDir = normalize(uLightDir);
         float NdotL = dot(normal, lightDir);
       
       // Detect top/bottom caps by normal direction
@@ -620,7 +636,8 @@
     const barrelCenter = [0, 0, 0];
     const cameraEye = [0, 8, 45];
     const cameraTarget = [0, -2, -100];
-    const lightPos = [35, 30, 60];
+    const lightDir = [0, 0, 0];
+    const lightDirView = normalize([0.7, 0.35, 0.62]); // front-right, slightly above (view space)
 
     // Expanding ring pulses around the barrel (Wind Waker-ish ripples)
     const MAX_RIPPLES = 8;
@@ -755,6 +772,32 @@
     }
 
     const viewMatrix = lookAt(cameraEye, cameraTarget, [0, 1, 0]);
+    function updateLightDir() {
+      // Build camera basis vectors in world space.
+      const forward = normalize([
+        cameraTarget[0] - cameraEye[0],
+        cameraTarget[1] - cameraEye[1],
+        cameraTarget[2] - cameraEye[2],
+      ]);
+      const right = normalize(cross(forward, [0, 1, 0]));
+      const up = cross(right, forward);
+
+      // View +Z points toward the camera; convert view-space to world-space.
+      const vx = lightDirView[0];
+      const vy = lightDirView[1];
+      const vz = lightDirView[2];
+      const world = normalize([
+        right[0] * vx + up[0] * vy + (-forward[0]) * vz,
+        right[1] * vx + up[1] * vy + (-forward[1]) * vz,
+        right[2] * vx + up[2] * vy + (-forward[2]) * vz,
+      ]);
+
+      lightDir[0] = world[0];
+      lightDir[1] = world[1];
+      lightDir[2] = world[2];
+    }
+    updateLightDir();
+
     let debugShadows = false;
     window.addEventListener('keydown', (e) => {
       if (e.key === 's') debugShadows = !debugShadows;
@@ -824,7 +867,7 @@
       gl.uniformMatrix4fv(gl.getUniformLocation(oceanProgram, 'uProjection'), false, proj);
       gl.uniformMatrix4fv(gl.getUniformLocation(oceanProgram, 'uView'), false, viewMatrix);
       gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uTime'), t);
-      gl.uniform3fv(gl.getUniformLocation(oceanProgram, 'uLightPos'), lightPos);
+      gl.uniform3fv(gl.getUniformLocation(oceanProgram, 'uLightDir'), lightDir);
       gl.uniform3fv(gl.getUniformLocation(oceanProgram, 'uBarrelCenter'), barrelCenter);
       gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uBarrelRadius'), 0.8);
       gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uBarrelHalfHeight'), 1.12);
@@ -860,7 +903,7 @@
       gl.uniformMatrix4fv(gl.getUniformLocation(barrelProgram, 'uView'), false, viewMatrix);
       gl.uniform1f(gl.getUniformLocation(barrelProgram, 'uTime'), t);
       gl.uniform3fv(gl.getUniformLocation(barrelProgram, 'uBarrelPos'), barrelPos);
-      gl.uniform3fv(gl.getUniformLocation(barrelProgram, 'uLightPos'), lightPos);
+      gl.uniform3fv(gl.getUniformLocation(barrelProgram, 'uLightDir'), lightDir);
       gl.uniform3fv(gl.getUniformLocation(barrelProgram, 'uCameraPos'), cameraEye);
 
       gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, barrelIndexBuffer);
