@@ -152,22 +152,21 @@
       }
 
       float waveShadowAt(vec3 worldPos) {
-        vec3 lightDir = normalize(uLightPos - worldPos);
-        float lenXZ = length(lightDir.xz);
-        if (lightDir.y <= 0.001 || lenXZ <= 0.001) return 0.0;
-
-        vec2 dirXZ = lightDir.xz / lenXZ;
-        float occlusion = 0.0;
-        float base = calculateSurface(0.0, 0.0);
-        const float stepDist = 10.0;
-        for (int i = 1; i <= 6; i++) {
-          float d = float(i) * stepDist;
-          vec2 sampleXZ = worldPos.xz + dirXZ * d;
-          float sampleY = waveHeightAtWithBase(sampleXZ, base);
-          float lineY = worldPos.y + (d * lightDir.y / lenXZ);
-          occlusion = max(occlusion, smoothstep(0.02, 0.22, sampleY - lineY));
-        }
-        return occlusion;
+        // Use consistent light direction for entire ocean (treat as directional light)
+        vec3 lightDir = normalize(uLightPos);
+        vec2 lightXZ = normalize(lightDir.xz);
+        
+        // Sample wave height gradient toward light
+        float eps = 2.0;
+        float hTowardLight = waveHeightAt(worldPos.xz + lightXZ * eps);
+        float hAwayFromLight = waveHeightAt(worldPos.xz - lightXZ * eps);
+        
+        // Slope toward light (positive = lit face, negative = back face in shadow)
+        float slope = (hTowardLight - hAwayFromLight) / (2.0 * eps);
+        
+        // Shadow on back side of waves
+        float shadow = smoothstep(0.04, -0.06, slope);
+        return shadow;
       }
 
       float rippleAt(vec2 worldXZ) {
@@ -230,7 +229,7 @@
           gl_FragColor = vec4(vec3(m), 1.0);
           return;
         }
-        float shade = 1.0 - 0.45 * barrelShadow - 0.22 * waveShadow;
+        float shade = 1.0 - 0.45 * barrelShadow - 0.38 * waveShadow;
         color *= clamp(shade, 0.35, 1.0);
 
         float ripples = rippleAt(vWorldPos.xz);
