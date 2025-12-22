@@ -84,6 +84,7 @@ main {
   align-items: center;
   justify-content: center;
   padding: 3rem;
+  background-color: rgba(248, 246, 243, 0.7);
 }
 
 .card-front-content {

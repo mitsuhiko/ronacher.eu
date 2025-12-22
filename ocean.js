@@ -798,11 +798,6 @@
     }
     updateLightDir();
 
-    let debugShadows = false;
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 's') debugShadows = !debugShadows;
-    });
-
     function render(time) {
     const t = time * 0.001;
     gl.clearColor(0, 0, 0, 1);
@@ -871,7 +866,7 @@
       gl.uniform3fv(gl.getUniformLocation(oceanProgram, 'uBarrelCenter'), barrelCenter);
       gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uBarrelRadius'), 0.8);
       gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uBarrelHalfHeight'), 1.12);
-      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uShadowDebug'), debugShadows ? 1.0 : 0.0);
+      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uShadowDebug'), 0.0);
       gl.uniform1fv(gl.getUniformLocation(oceanProgram, 'uRippleTimes[0]'), rippleTimes);
       gl.uniform1fv(gl.getUniformLocation(oceanProgram, 'uRippleAmps[0]'), rippleAmps);
       gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uRippleSpeed'), rippleSpeed);
