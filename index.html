@@ -303,7 +303,12 @@
     }
   `;
 
-    const oceanFragmentSource = `
+    const hasDerivatives = !!gl.getExtension('OES_standard_derivatives');
+    const oceanFragmentHeader = hasDerivatives
+      ? '#extension GL_OES_standard_derivatives : enable\n#define HAS_DERIVATIVES 1\n'
+      : '#define HAS_DERIVATIVES 0\n';
+
+    const oceanFragmentSource = oceanFragmentHeader + `
       precision highp float;
       varying vec2 vUv;
       varying float vHeight;
@@ -315,6 +320,14 @@
       uniform float uBarrelRadius;
       uniform float uBarrelHalfHeight;
       uniform float uShadowDebug;
+
+      #define MAX_RIPPLES 12
+      uniform float uRippleTimes[MAX_RIPPLES];
+      uniform float uRippleAmps[MAX_RIPPLES];
+      uniform float uRippleSpeed;
+      uniform float uRippleMaxAge;
+      uniform float uRippleWidth;
+      uniform float uRippleStrength;
 
       const vec3 uColor = vec3(0.165, 0.153, 0.145);
       const vec3 uLightColor = vec3(0.28, 0.25, 0.22);
@@ -389,6 +402,44 @@
         return occlusion;
       }
 
+      float rippleAt(vec2 worldXZ) {
+        vec2 p = worldXZ - uBarrelCenter.xz;
+        float d = length(p);
+        float a = atan(p.y, p.x);
+
+        float m = 0.0;
+        for (int i = 0; i < MAX_RIPPLES; i++) {
+          float age = uTime - uRippleTimes[i];
+          float amp = uRippleAmps[i];
+          float alive = step(0.0, age) * (1.0 - step(uRippleMaxAge, age));
+
+          float r0 = uBarrelRadius * 1.1 - 0.15;
+          float r = r0 + age * uRippleSpeed;
+          r *= 1.0 + 0.02 * sin(a * 6.0 + age * 5.0 + float(i) * 1.37);
+
+          float distToRing = abs(d - r);
+          float aa = 0.035 + 0.0015 * d;
+          #if HAS_DERIVATIVES
+            aa = max(fwidth(d), 0.02);
+          #endif
+          float band = smoothstep(uRippleWidth + aa, uRippleWidth, distToRing);
+          // Toon-ish threshold with just enough AA to avoid shimmer.
+          band = smoothstep(0.75 - aa * 6.0, 0.75 + aa * 6.0, band);
+
+          // Keep the ring fully present right when it spawns, then fade.
+          float fadeStart = 0.22;
+          float fadeLen = max(uRippleMaxAge - fadeStart, 0.001);
+          float tNorm = max(0.0, age - fadeStart) / fadeLen;
+          float ageFade = (1.0 - smoothstep(fadeStart, uRippleMaxAge, age)) * exp(-tNorm * 2.7);
+          // Only fade out near the outer limit; don't dim near the origin.
+          float maxR = r0 + uRippleSpeed * uRippleMaxAge;
+          float distFade = 1.0 - smoothstep(maxR * 0.78, maxR, d);
+
+          m += alive * band * ageFade * distFade * amp;
+        }
+        return clamp(m, 0.0, 1.0);
+      }
+
       void main() {
         vec2 uv = vUv * 20.0 + vec2(uTime * -0.05);
 
@@ -413,6 +464,9 @@
         }
         float shade = 1.0 - 0.45 * barrelShadow - 0.22 * waveShadow;
         color *= clamp(shade, 0.35, 1.0);
+
+        float ripples = rippleAt(vWorldPos.xz);
+        color += uLightColor * (ripples * uRippleStrength);
 
         // Radial fog - fade edges and distance
         float distZ = -vWorldPos.z;
@@ -800,6 +854,42 @@
     const cameraEye = [0, 8, 45];
     const cameraTarget = [0, -2, -100];
     const lightPos = [35, 30, 60];
+
+    // Expanding ring pulses around the barrel (Wind Waker-ish ripples)
+    const MAX_RIPPLES = 8;
+    const rippleTimes = new Float32Array(MAX_RIPPLES);
+    const rippleAmps = new Float32Array(MAX_RIPPLES);
+    rippleTimes.fill(-1e6);
+    rippleAmps.fill(0);
+    let rippleCursor = 0;
+    let lastRippleSpawn = -1e9;
+    let lastRenderT = null;
+    let prevBarrelWaveHeight = 0;
+
+    const RIPPLE_BASE_SPEED = 0.6;
+    const RIPPLE_BASE_MAX_AGE = 0.8;
+    const RIPPLE_BASE_INTERVAL = 0.4;
+
+    // Target: half the speed, three times the travel distance.
+    const RIPPLE_SPEED_SCALE = 0.5;
+    const RIPPLE_DISTANCE_SCALE = 3.0;
+
+    const rippleSpeed = RIPPLE_BASE_SPEED * RIPPLE_SPEED_SCALE;
+    const rippleTravelDistance = (RIPPLE_BASE_SPEED * RIPPLE_BASE_MAX_AGE) * RIPPLE_DISTANCE_SCALE;
+    const rippleMaxAge = rippleTravelDistance / Math.max(0.001, rippleSpeed);
+
+    // Keep ripple spacing stable in world units (not time), and avoid overwriting
+    // ripples before they reach the outer radius.
+    const rippleSpacing = RIPPLE_BASE_SPEED * RIPPLE_BASE_INTERVAL;
+    const rippleIntervalFromSpacing = rippleSpacing / Math.max(0.001, rippleSpeed);
+    const minIntervalToAvoidOverwrite = rippleMaxAge / Math.max(1, (MAX_RIPPLES - 1));
+    const rippleInterval = Math.max(rippleIntervalFromSpacing, minIntervalToAvoidOverwrite);
+
+    function spawnRipple(t, amp) {
+      rippleTimes[rippleCursor] = t;
+      rippleAmps[rippleCursor] = amp;
+      rippleCursor = (rippleCursor + 1) % MAX_RIPPLES;
+    }
     
     // Unproject screen coords to world position on ocean plane (y=0)
     function screenToWorld(screenX, screenY, projMatrix, viewMat) {
@@ -919,6 +1009,24 @@
       barrelPos[2] = worldPos[2];
 
       const barrelWaveHeight = barrelWaveHeightAt(barrelPos[0], barrelPos[2], t);
+
+      // Spawn ripples constantly; modulate strength by bobbing velocity.
+      if (lastRenderT !== null) {
+        const dt = Math.max(0.001, t - lastRenderT);
+        const vel = (barrelWaveHeight - prevBarrelWaveHeight) / dt;
+        const v = Math.abs(vel);
+
+        if ((t - lastRippleSpawn) > rippleInterval) {
+          spawnRipple(t, 1.0);
+          lastRippleSpawn = t;
+        }
+      } else {
+        spawnRipple(t, 1.0);
+        lastRippleSpawn = t;
+      }
+      lastRenderT = t;
+      prevBarrelWaveHeight = barrelWaveHeight;
+
       barrelCenter[0] = barrelPos[0];
       barrelCenter[1] = barrelWaveHeight - 0.8 + 1.12;
       barrelCenter[2] = barrelPos[2];
@@ -951,9 +1059,15 @@
       gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uTime'), t);
       gl.uniform3fv(gl.getUniformLocation(oceanProgram, 'uLightPos'), lightPos);
       gl.uniform3fv(gl.getUniformLocation(oceanProgram, 'uBarrelCenter'), barrelCenter);
-      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uBarrelRadius'), 0.9);
+      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uBarrelRadius'), 0.8);
       gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uBarrelHalfHeight'), 1.12);
       gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uShadowDebug'), debugShadows ? 1.0 : 0.0);
+      gl.uniform1fv(gl.getUniformLocation(oceanProgram, 'uRippleTimes[0]'), rippleTimes);
+      gl.uniform1fv(gl.getUniformLocation(oceanProgram, 'uRippleAmps[0]'), rippleAmps);
+      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uRippleSpeed'), rippleSpeed);
+      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uRippleMaxAge'), rippleMaxAge);
+      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uRippleWidth'), 0.085);
+      gl.uniform1f(gl.getUniformLocation(oceanProgram, 'uRippleStrength'), 1.9);
 
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, texture);
