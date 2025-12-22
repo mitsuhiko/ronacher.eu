@@ -216,7 +216,10 @@
       uv.y += 0.12 * (sin(uv.x * 4.2 + uTime * 0.64) + sin(uv.x * 6.3 + uTime * 1.65) + sin(uv.x * 8.2 + uTime * 0.45)) / 3.0;
 
       vec4 tex1 = texture2D(uMap, uv);
-      vec4 tex2 = texture2D(uMap, uv + vec2(0.2));
+      // Slight, slow drift for the darker "lower water" layer.
+      vec2 uv2 = uv + vec2(0.2);
+      uv2 += 0.02 * vec2(sin(uTime * 0.07), cos(uTime * 0.05));
+      vec4 tex2 = texture2D(uMap, uv2);
 
         vec3 lightDir = normalize(uLightDir);
         float base = calculateSurface(0.0, 0.0);
