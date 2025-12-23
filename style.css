@@ -10,6 +10,7 @@ body {
 
 body.fade-bg {
   background: #1c1b19;
+  transition: background 0.8s ease-out;
 }
 
 #ocean-canvas {
@@ -41,6 +42,7 @@ main {
   display: flex;
   align-items: center;
   justify-content: center;
+  pointer-events: none;
 }
 
 .card-container {
@@ -48,6 +50,7 @@ main {
   opacity: 0;
   transition: opacity 1.2s ease-out;
   position: relative;
+  pointer-events: auto;
 }
 
 .card-container.visible {
