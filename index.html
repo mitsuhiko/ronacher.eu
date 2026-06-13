@@ -13,42 +13,38 @@
 <canvas id="ocean-canvas"></canvas>
 <script src="ocean.js"></script>
 <main>
-  <div class="card-container" onclick="if(event.target.tagName!=='A'){this.classList.toggle('expanded');}">
-    <div class="card-front">
-      <img src="avatar-large.jpg" alt="" class="avatar">
-      <h1>Armin Ronacher</h1>
-      <p class="tagline">Building Teams, Software and Products</p>
-      <div class="hint">learn more ↓</div>
-    </div>
-    <div class="card-back">
-      <div class="card-back-inner">
+  <div class="card-container">
+    <section class="card" aria-labelledby="intro-title">
+      <header class="card-header">
         <img src="avatar-large.jpg" alt="" class="avatar">
-        <h1>Armin Ronacher</h1>
-        <div class="card-back-content">
-          <p>
-            I build teams and software — particularly Open Source software.
-            You might know me as creator of <a href="https://flask.palletsprojects.com/">Flask</a> or
-            <a href="https://lucumr.pocoo.org/projects/">other Open Source projects</a>.
-          </p>
-          <p>
-            For a decade I poured my energy into <a href="https://sentry.io/welcome/">Sentry</a>.
-            Now <a href="https://lucumr.pocoo.org/2025/3/31/leaving/">building something new</a> at
-            <a href="https://earendil.com/">Earendil</a>.
-          </p>
-          <ul>
-            <li>Read my <a href="https://lucumr.pocoo.org/">Technology Blog</a></li>
-            <li>or my <a href="https://dark.ronacher.eu/">Darker Thoughts</a></li>
-            <li>Follow me as <a href="https://bsky.app/profile/mitsuhiko.at">@mitsuhiko.at</a> on Bluesky</li>
-            <li>or <a href="https://twitter.com/@mitsuhiko">mitsuhiko</a> on Twitter/X</li>
-            <li>Find me as <a href="https://github.com/mitsuhiko">mitsuhiko</a> on GitHub</li>
-            <li>You can also <a href="https://github.com/sponsors/mitsuhiko">sponsor me</a></li>
-            <li>Or <a href="mailto:armin.ronacher@active-4.com">send me an email</a></li>
-            <li>Or <a href="https://lucumr.pocoo.org/about/">learn more about me</a></li>
-          </ul>
-          <div class="hint">click to collapse ↑</div>
+        <div>
+          <h1 id="intro-title">Armin Ronacher</h1>
+          <p class="tagline">Building Teams, Software and Products</p>
         </div>
+      </header>
+      <div class="card-content">
+        <p>
+          I build teams and software — particularly Open Source software.
+          You might know me as creator of <a href="https://flask.palletsprojects.com/">Flask</a> or
+          <a href="https://lucumr.pocoo.org/projects/">other Open Source projects</a>.
+        </p>
+        <p>
+          For a decade I poured my energy into <a href="https://sentry.io/welcome/">Sentry</a>.
+          Now <a href="https://lucumr.pocoo.org/2025/3/31/leaving/">building something new</a> at
+          <a href="https://earendil.com/">Earendil</a>.
+        </p>
+        <ul>
+          <li>Read my <a href="https://lucumr.pocoo.org/">Technology Blog</a></li>
+          <li>or my <a href="https://dark.ronacher.eu/">Darker Thoughts</a></li>
+          <li>Follow me as <a href="https://bsky.app/profile/mitsuhiko.at">@mitsuhiko.at</a> on Bluesky</li>
+          <li>or <a href="https://twitter.com/@mitsuhiko">mitsuhiko</a> on Twitter/X</li>
+          <li>Find me as <a href="https://github.com/mitsuhiko">mitsuhiko</a> on GitHub</li>
+          <li>You can also <a href="https://github.com/sponsors/mitsuhiko">sponsor me</a></li>
+          <li>Or <a href="mailto:armin.ronacher@active-4.com">send me an email</a></li>
+          <li>Or <a href="https://lucumr.pocoo.org/about/">learn more about me</a></li>
+        </ul>
       </div>
-    </div>
+    </section>
   </div>
 </main>
 </body>
