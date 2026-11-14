@@ -9,9 +9,9 @@
  *  thurngasse-map.js, loaded before this file, says for every point
  *  what there is (a wall, a window, a step), how light it is there
  *  without the sun, and where the sun falls when it shines.  The rails
- *  are too thin for that: the map has them as lines, and the windows
- *  that are lit at night as shapes.  The trees, the lamp and the street
- *  sign are drawn by hand.  Nobody is on the stairs.
+ *  are too thin for that: the map has them as lines, and the corners of
+ *  the windows that are lit at night.  The trees, the lamp and the
+ *  street sign are drawn by hand.  Nobody is on the stairs.
  *  scene.js paints the sky and says what a place has to bring along.
  * ------------------------------------------------------------------ */
 (window.viennaPlaces = window.viennaPlaces || []).push({ id: 'thurngasse', name: 'Thurngasse', make(kit) {
@@ -180,39 +180,52 @@ function mark(x, y, rad, v) {                                  // something thin
 }
 
 // ---------- the windows ----------
-// By day a window is what the map has there.  At night it is a shape with four corners, lit or dark: the map has
-// those too, corner by corner in ten-thousandths of the photograph, for the houses near by.  Other strokes keep
-// clear of them then (3).
-let panes = [];
+// By day a window is what the map has there.  At night it has four corners and is lit or dark: the map has those
+// too, corner by corner in ten-thousandths of the photograph, for the houses near by.  Other strokes keep clear
+// of them then (3 and up: which window), and they are painted like everything else, stroke by stroke: upright
+// ones for the panes, dark ones for the bars between them.
+let panes = [], paneArea = 0;
 function buildWindows() {
   const q = MAP.windows;
-  panes = [];
-  for (let i = 0; i < q.length; i += 9) {
+  panes = []; paneArea = 0;
+  for (let i = 0; i < q.length && panes.length < 250; i += 9) {
     const pts = []; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
     for (let k = 0; k < 8; k += 2) { const x = px(q[i + k] / 1e4), y = py(q[i + k + 1] / 1e4); pts.push([x, y]); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
     if (x1 < 0 || x0 > W || y1 < 0 || y0 > H) continue;
-    panes.push({ pts, lit: q[i + 8] === 1, x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: (pts[1][0] - pts[0][0]), h: pts[3][1] - pts[0][1], k: (i * .377) % 1 });
+    const w = { pts, lit: q[i + 8] === 1, x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: Math.max(1, pts[1][0] - pts[0][0]), h: Math.max(1, pts[3][1] - pts[0][1]), k: (i * .377) % 1 };
+    w.area = w.w * w.h; paneArea += w.area;
     for (let cy = Math.max(0, Math.floor(y0 / mCell)); cy <= Math.min(mRows - 1, y1 / mCell); cy++) for (let cx = Math.max(0, Math.floor(x0 / mCell)); cx <= Math.min(mCols - 1, x1 / mCell); cx++)
-      if (inside(pts, (cx + .5) * mCell, (cy + .5) * mCell)) mask[cy * mCols + cx] = 3;
+      if (inside(pts, (cx + .5) * mCell, (cy + .5) * mCell)) mask[cy * mCols + cx] = 3 + panes.length;
+    panes.push(w);
   }
 }
 const along = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-function paneStroke() {                                        // a whole window at a time
-  const R = PP.R, w = panes[(R() * panes.length) | 0];
-  if (!w || !at(clamp(w.x, 0, W - 1), clamp(w.y, 0, H - 1)) || !night) return;
-  const xf = fx(w.x), pf = fy(w.y), p = w.pts, o = { wob: .3 * U, jit: 4, hd: .7, hw: 2.4 * U, hl: w.h * .9, ang: 1.5, ha: .35, hj: 10, maxN: 5 };
-  if (!w.lit) {                                                // nobody at home: the sky in its panes, what there is of it
-    PP.shape(p, hazed(mix(ramp(pal.panes, .1), pal.skyMid, .14), xf, pf), o);
+const CROSS = .36;                                             // how far down a window the bar across it is
+function paneStroke(w) {                                       // somewhere in a window
+  const R = PP.R, p = w.pts, xf = fx(w.x), pf = fy(w.y), bars = w.lit && w.w > 6 * U, bw = Math.max(U, w.w * .08);
+  if (bars && R() < .22) {                                     // the bars between its panes, dark against the light
+    const bar = hazed(mix(pal.dark, pal.lights[0], .22), xf, pf), o = { a: .92, jit: 3, dry: 0, bow: 0, sp: Math.min(1.1 * U, bw) };
+    let a, b;
+    if (R() < .5) { const t = R() * .6, c = along(p[0], p[1], .5), d = along(p[3], p[2], .5); a = along(c, d, t); b = along(c, d, t + .4); }
+    else { a = along(p[0], p[3], CROSS); b = along(p[1], p[2], CROSS); }
+    PP.brush(a[0], a[1], b[0], b[1], bw, bar, o);
     return;
   }
-  const col = mix(pal.lights[0], pal.lights[2], w.k);
-  o.cols = [pal.lights[0], pal.lights[2], pal.lights[4]];
-  PP.shape(p, hazed(col, xf, pf), o);
-  if (w.w > 6 * U) {                                           // the bars between its panes, dark against the light
-    const bar = mix(pal.dark, col, .2), wd = Math.max(U, w.w * .08), lo = { a: .9, pass: 1, wob: .2 * U, step: 999, jit: 3 };
-    PP.line([along(p[0], p[1], .5), along(p[3], p[2], .5)], bar, wd, lo);
-    PP.line([along(p[0], p[3], .36), along(p[1], p[2], .36)], bar, wd, lo);
-  }
+  // a pane: an upright stroke, from the edge of the window or the bar across it
+  const sw = Math.min(w.w, (1.8 + R() * 1.6) * U), m = sw / 2 / w.w, u = m + R() * (1 - 2 * m), top = along(p[0], p[1], u), foot = along(p[3], p[2], u);
+  let v0 = 0, v1 = 1;
+  if (bars) { if (R() < CROSS) v1 = CROSS - bw / 2 / w.h; else v0 = CROSS + bw / 2 / w.h; }
+  const span = v1 - v0, l = Math.min(span, (7 + R() * 10) * U / w.h), q = R(), v = v0 + (q < .3 ? 0 : q < .6 ? span - l : R() * (span - l));
+  const a = along(top, foot, v), b = along(top, foot, v + l), k = R();
+  const col = w.lit ? mix(mix(pal.lights[0], pal.lights[2], w.k), k < .5 ? pal.lights[4] : pal.lights[1], R() * .35)
+    : mix(ramp(pal.panes, .06 + k * .1), pal.skyMid, .08 + R() * .12);   // nobody at home: the sky in its panes, what there is of it
+  PP.brush(a[0], a[1], b[0], b[1], sw, hazed(col, xf, pf), { a: .95, jit: 5, dry: .03, bow: 0, sp: Math.min(1.1 * U, sw) });
+}
+function paneDab() {                                           // the windows once more: they are small, and the night is long
+  const R = PP.R; let k = R() * paneArea, w = panes[0];
+  if (!w) return;
+  for (const t of panes) { w = t; k -= t.area; if (k <= 0) break; }
+  if (at(clamp(w.x, 0, W - 1), clamp(w.y, 0, H - 1)) && night) paneStroke(w);
 }
 
 // ---------- the rails ----------
@@ -265,13 +278,14 @@ const inTrees = (x, y) => y < treeFoot && y > treeTop && x > treeX0 && x < treeX
 
 // ---------- whose a point is ----------
 const SIGN = [.0795, .1285, .5445, .5625];                     // the street sign on the house on the left: left, right, top, foot
-let zx = 0, zy = 0, zf = 0;                                    // what zone() learnt on the way: x and y on the photo, how deep in the leaves
+let zx = 0, zy = 0, zf = 0, zw = 0;                            // what zone() learnt on the way: x and y on the photo, how deep in the leaves, which window
 function zone(x, y) {
   const xf = zx = fx(x), pf = zy = fy(y), m = maskAt(x, y);
   if (m === 2) return RAIL;
-  if (m === 3) { if (night) return PANE; } else if (inTrees(x, y)) {
+  if (m >= 3 && night) { zw = m - 3; return PANE; }
+  if (inTrees(x, y)) {
     const f = zf = bare ? -1 : fol(x, y);
-    if (m && f < .15) return LIMB;
+    if (m === 1 && f < .15) return LIMB;
     if (f > 0) return LEAVES;
   }
   if (xf > SIGN[0] && xf < SIGN[1] && pf > SIGN[2] && pf < SIGN[3]) return PLATE;
@@ -309,7 +323,7 @@ function landStroke(y0, y1) {                                  // somewhere betw
   const R = PP.R, x = R() * W, y = y0 + R() * (y1 - y0);
   if (!at(x, y)) return;
   const k = zone(x, y);
-  if (k === LEAVES) leafStroke(x, y); else if (k !== SKY && k < RAIL) flatStroke(x, y, k);
+  if (k === LEAVES) leafStroke(x, y); else if (k === PANE) paneStroke(panes[zw]); else if (k !== SKY && k < RAIL) flatStroke(x, y, k);
 }
 const BANDS = [() => landStroke(0, H / 3), () => landStroke(H / 3, H * 2 / 3), () => landStroke(H * 2 / 3, H)];
 function signStroke() {                                        // "9., Wasagasse": white on blue, as they are in Vienna
@@ -424,7 +438,7 @@ function drawLamps(P, t) {
 
 // ---------- the painting, one frame's worth ----------
 let tops = null, skyX0 = 0, skyX1 = 0;
-const RATE = { land: 20000, rail: 1.5, pane: .8, leaf: 9000, limb: 1.2, sign: 9000, fog: 1500 };
+const RATE = { land: 20000, rail: 1.5, pane: 60000, leaf: 9000, limb: 1.2, sign: 9000, fog: 1500 };
 const place = {
   colors: {
     walls: ['#2c3037', '#585c64', '#8a8a89', '#b4afa7', '#dfd9cd', '#fcf8ef'], creams: ['#2e2a26', '#5e5548', '#8f8370', '#b8a98f', '#dfcfb0', '#f6ead0'],
@@ -481,7 +495,7 @@ const place = {
     clipBand(0, H);
     for (let n = 0; n < 3; n++) spend('tg-land' + n, RATE.land * W * H / 3 / ua * pace, BANDS[n]);
     spend('tg-rail', RATE.rail * railLength / (13 * U) * pace, railStroke);
-    if ((s && s.night) || (o && o.night)) spend('tg-pane', RATE.pane * panes.length * pace, paneStroke);
+    if ((s && s.night) || (o && o.night)) spend('tg-pane', RATE.pane * paneArea / ua * pace, paneDab);
     spend('tg-limb', RATE.limb * limbLength / (14 * U) * pace, limbStroke);
     if (leafy) spend('tg-leaf', RATE.leaf * leafArea / ua * pace, leafDab);
     spend('tg-sign', RATE.sign * (SIGN[1] - SIGN[0]) * PW * (SIGN[3] - SIGN[2]) * PH / ua * pace, signStroke);
