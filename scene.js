@@ -297,8 +297,8 @@ function weatherDay(d, name, own) {                             // own: the colo
   p.fog = mix(p.skyLow, WHITE, .25); p.rain = mix(p.skyLight, WHITE, .5); p.flake = WHITE; p.moonGlow = p.skyLight;
   return p;
 }
-function weatherNight(n, name) {
-  const w = WEATHER[name], lift = NIGHT_LIFT[name];
+function weatherNight(n, name, own) {                          // own: the night the place has brought for this weather, its sky as it is
+  const w = WEATHER[name], lift = own ? 0 : NIGHT_LIFT[name];
   if (lift) {
     const g = hex('#525a69');
     n.skyTop = mix(n.skyTop, g, lift * .7); n.skyMid = mix(n.skyMid, g, lift); n.skyLow = mix(n.skyLow, hex('#6c7079'), lift);
@@ -308,6 +308,7 @@ function weatherNight(n, name) {
   }
   if (w.mist) { n.haze = mix(n.haze, n.skyLow, w.mist); n.cityFar = mix(n.cityFar, n.skyLow, w.mist); recolor(n, TOWN, c => mix(c, n.skyLow, w.mist * .5)); }
   n.fog = mix(n.skyLow, hex('#8a93a3'), .4); n.rain = mix(n.skyLow, hex('#c3cfe3'), .7); n.flake = mix(n.skyLow, hex('#e6ecf6'), .8);
+  if (own) for (const k in own) if (k in n && k !== 'haze' && typeof own[k] === 'string') n[k] = hex(own[k]);   // and whatever else it wants to be just so
   return n;
 }
 const palettes = {};
@@ -321,9 +322,10 @@ function paletteOf(place, season, name, isNight) {
     d.city = d.city.map(c => mix(c, hex('#ffe9c8'), .18)); d.cityFar = mix(d.cityFar, hex('#f3dfc6'), .4);
   }
   if (!isNight) return palettes[key] = d;
-  const n = nightOf(d, NIGHT[season], place.weathers && !place.weathers[name] ? null : place.ground);
+  const own = place.nights && place.nights[name];
+  const n = nightOf(d, own ? Object.assign({}, NIGHT[season], own) : NIGHT[season], place.weathers && !place.weathers[name] ? null : place.ground);
   for (const k in GLOW) n[k] = base[k];
-  return palettes[key] = weatherNight(n, name);
+  return palettes[key] = weatherNight(n, name, own);
 }
 // skies: [x, base (0 top .. 1 horizon), width, height, drift, seed] for every cloud
 const OVERCAST = [[.2, .4, .6, .2, 4, 83], [.75, .5, .6, .24, 3.5, 89], [.45, .8, .7, .16, 3, 97], [.05, .85, .4, .12, 3, 101], [.9, .2, .5, .12, 5, 103], [.5, .18, .5, .1, 5, 107]];
@@ -523,7 +525,9 @@ const wind = t => Math.sin(t * 1.7) * .5 + Math.sin(t * 2.9 + 1) * .3 + Math.sin
 //   colors, seasons   colours of its own, added to those of the season; seasons: { winter: { ... } }
 //                     for what differs by season, weathers: { snow: { ... } } for what differs by weather.
 //                     ground: a test for those that snow lies on: all winter, or only in the weathers
-//                     it has colours for.
+//                     it has colours for.  nights: { fog: { navy, sky, cloud, haze, glow } } for a weather
+//                     whose night is another one here than anywhere else (see NIGHT), with any colour
+//                     of the picture that is to be just so (fog, skyDark).
 //   layout(view)      the picture has got another size: { W, H, U }.  Sets hz, its horizon.  Called
 //                     before the place is shown, not for those nobody looks at.
 //   tick(time)        the clock, every frame
@@ -537,7 +541,7 @@ const wind = t => Math.sin(t * 1.7) * .5 + Math.sin(t * 2.9 + 1) * .3 + Math.sin
 //   coat(cells, from, to, picture) its share of a fresh coat: a broad stroke at each of these cells
 //   sprites           [{ draw(painter, time, picture), t0, seed }]: what moves, drawn anew every frame
 const kit = {
-  PP, E, TAU, clamp, smooth, ease, hex, mix, css, pick, rng, hash1, vnoise, fbm, wind, light, spend, clipBand,
+  PP, E, TAU, clamp, smooth, ease, hex, mix, css, pick, rng, hash1, vnoise, fbm, wind, light, spend, clipBand, skyCol, dens,
   at(x, y, place) { const s = sceneAt(x, y); return s && s.place === place ? s : null; },
 };
 const places = PLACES.map(p => Object.assign(p.make(kit), { id: p.id, name: p.name }));

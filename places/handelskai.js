@@ -6,7 +6,7 @@
  * ------------------------------------------------------------------ */
 (window.viennaPlaces = window.viennaPlaces || []).push({ id: 'handelskai', name: 'Handelskai', make(kit) {
 'use strict';
-const { PP, TAU, clamp, smooth, ease, mix, pick, rng, hash1, vnoise, fbm, wind, light, spend, clipBand } = kit;
+const { PP, TAU, clamp, smooth, ease, hex, mix, pick, rng, hash1, vnoise, fbm, wind, light, spend, clipBand, skyCol, dens } = kit;
 
 // ---------- what the brush is looking at ----------
 let W = 0, H = 0, U = 1, time = 0;          // the view (CSS pixels, the stroke unit) and the clock
@@ -47,12 +47,43 @@ const yardEdge = xf => EDGE + (vnoise(xf * 40, 7.7) - .5) * .01;
 // how far off the thing is, and the brush mixes the fog in.  The yard and the river are level ground, where it is
 // a matter of how close to the horizon a point lies; what stands upright is as far off as its foot.
 const flatOff = pf => .06 / (.06 + Math.max(0, pf - VY));
-const FAR_OFF = .72, TREE_OFF = flatOff(.61);
+const FAR_OFF = .72, TREE_OFF = flatOff(.61), HIGH = .55;      // by night the fog hangs high: there is less of it between us and things
 const towerOff = y => .62 - .24 * clamp((SHORE - fy(y)) / .2);   // the fog lies on the river: the towers rise out of it
 const fogCol = () => night ? mix(pal.skyLow, pal.fog, .35) : pal.fog;   // by night it is no lighter than the sky
-const hazeOf = (d, k) => traits.fog ? [fogCol(), clamp(d * 1.4 - .1, 0, .85) * traits.fog * (k || 1)] : null;
+const hazeOf = (d, k) => traits.fog ? [fogCol(), clamp(d * 1.4 - .1, 0, .85) * traits.fog * (k || 1) * (night ? HIGH : 1)] : null;
 const veil = d => { PP.haze = hazeOf(d); };
 const glow = d => { PP.haze = hazeOf(d, .45); };                // a light carries through the fog
+function over(h, col, c) {                                     // one more veil in front of another
+  if (!h) return [col, c];
+  const a = h[1], both = a + c - a * c;
+  return [mix(col, h[0], both ? a * (1 - c) / both : 0), both];
+}
+
+// A night of fog is another thing again.  The town lights the fog from below: the sky is a dull warm grey, lighter
+// than the towers, and it hangs so low that the tall ones stand in it with their heads.  Round each of their red
+// lights the fog glows, the wider the deeper in it the light is.
+const CEIL = [.4, .29];                                        // where the towers begin to pale into the sky, and where nothing would be left of them
+const NEAR = .6, OFFICE = hex('#dcefe4');                      // how much of a glow is so red that no sky shows through; the light of an office
+const murk = () => night && traits.fog > 0;
+const ceilAt = y => Math.pow(clamp((CEIL[0] - fy(y)) / (CEIL[0] - CEIL[1])), 1.5) * .96;
+let beacons = [], halos = [], haloArea = 0;
+function redAt(x, y, wide) {                                   // how red the fog glows here; wide: only round the lights that glow far
+  let g = 0;
+  for (const b of halos) {
+    const dx = x - b.x, dy = y - b.y; if (dx > b.r || dx < -b.r || dy > b.r || dy < -b.r || (wide && b.r < 8 * U)) continue;
+    const f = 1 - Math.hypot(dx, dy) / b.r; if (f > 0) g = 1 - (1 - g) * (1 - Math.pow(f, 2.1));
+  }
+  return g;
+}
+function towerVeil(x, y, k) {                                  // what is between us and a tower; k: how much of that a light is dimmed by
+  let h = hazeOf(towerOff(y), k);
+  if (murk()) {
+    const c = ceilAt(y) * (k || 1), g = redAt(x, y, true) * .85 * (k || 1);   // a tower's strokes are too long for the small ones
+    if (c > .01) h = over(h, skyCol(y), c);
+    if (g > .01) h = over(h, pal.beacon, g);
+  }
+  PP.haze = h;
+}
 
 const QUAY = [.577, .8], LOW = [.712, .17];                    // the wall along the water: its top, its end (in the tall trees); the low one by the tracks: its line, its end
 const SHIP = [.458, .748, .553, .58, .47, .735, .532];         // the ship at the quay, its waterline behind the wall: hull from, to, its top, its foot; the decks from, to, their top
@@ -192,6 +223,11 @@ const TOWERS = [
 // The Donauturm is not a slab: [height, half its width there], from the tip of the antenna down.
 const TURM_X = .151, TURM = [[.302, .0008], [.343, .0011], [.3465, .0035], [.353, .0085], [.371, .0085], [.3775, .0048], [.386, .0033], [.53, .0046]];
 const turmHW = y => along2(TURM, fy(y)) * WU;
+// The red lights on the tall ones: [which tower (its place in TOWERS; -1: the Donauturm), where across it, how far below its top, how big].
+// The big ones are those that blink through a clear night.
+const LIGHTS = [[-1, .5, 0, 1], [-1, .5, .0445, .4], [12, .5, 0, 1],
+  [13, .05, 0, .8], [13, .95, 0, .8], [13, .5, -.002, .7], [13, 0, .06, .35], [13, 1, .06, .35], [13, 0, .12, .35], [13, 1, .12, .35],
+  [14, .06, 0, .4], [14, .94, 0, .4], [16, .5, -.003, .8], [16, 0, .035, .3], [16, 1, .035, .3], [16, 0, .075, .3], [16, 1, .075, .3]];
 let towers = [], towerWeight = 0, turm = null, roof = null, stop = null, tops = null, landTop = 0;
 function buildTowers() {
   towers = []; towerWeight = 0;
@@ -205,6 +241,13 @@ function buildTowers() {
   landTop = H;
   for (const t of towers) { t.wt = clamp((t.x1 - t.x0) * (t.y1 - t.y0) / (90 * U * U), 1.5, 120); towerWeight += t.wt; landTop = Math.min(landTop, t.y0); }
   landTop -= 8 * U;
+  beacons = []; halos = []; haloArea = 0;
+  for (const [i, u, down, k] of LIGHTS) {
+    const t = i < 0 ? turm : towers[i], x = i < 0 ? t.cx : t.x0 + u * (t.x1 - t.x0), y = t.y0 + down * PH + (down ? 0 : 1.5 * U);
+    const deep = clamp((.47 - fy(y)) / .17), b = { x, y, k, ph: beacons.length * 1.9, r: Math.max(2 * U, (.004 + .016 * deep * deep) * WU * (.5 + .5 * k)) };
+    beacons.push(b);
+    if (b.r > 3 * U) { halos.push(b); haloArea += b.r * b.r; landTop = Math.min(landTop, y - b.r - 4 * U); }
+  }
   tops = new Float32Array(n);                                  // the tops of the trees on the far bank, pixel by pixel
   for (let i = 0; i < n; i++) tops[i] = HZ - farH(i);
   roof = new Float32Array(n).fill(1e9);                        // the roofline: where the slabs end
@@ -269,7 +312,11 @@ function farStroke() {
   if (f > .55 && k < .4) col = mix(col, pal.folSun, .45); else if (pal.accent && k > .93) col = mix(pick(pal.accent, R()), pal.haze, .25);
   veil(FAR_OFF);
   PP.dab(x, y, (1.4 + R() * 2.4) * U, col, { a: .9, den: .8, core: .6, s: 1.6 * U });
-  if (night) { const lx = shoreLamp(x); if (Math.abs(x - lx) < 5 * U && R() < .5) { glow(FAR_OFF); light(lx, HZ - .004 * PH, (.6 + R() * .4) * U); } }
+  if (night) { const lx = shoreLamp(x); if (Math.abs(x - lx) < 5 * U && R() < .5) {
+    glow(FAR_OFF);
+    if (traits.fog && R() < .5) PP.dab(lx, HZ - .004 * PH, 5 * U, pal.lights[0], { a: .1, den: .4, s: 2.4 * U, jit: 3 });   // and all the wider for it
+    light(lx, HZ - .004 * PH, (.6 + R() * .4) * U);
+  } }
 }
 
 function towerTone(t) { return mix(t.col === 'sand' ? pal.city[7] : pal[t.col], pal.cityFar, .2 + traits.rain * .08); }
@@ -281,7 +328,7 @@ function towerStroke() {
   const w = t.x1 - t.x0, u = (x - t.x0) / w, fh = 3.4 * U, fl = Math.floor((y - t.y0) / fh), far = .2 + traits.rain * .08;
   const o = { a: .92, jit: 6, dry: .04, bow: 0, sp: 1.1 * U };
   const base = t.col === 'sand' ? pal.city[7] : pal[t.col];
-  veil(towerOff(y));
+  towerVeil(x, y);
   if (t === turm) {
     const pf = fy(y), hw = Math.max(.7 * U, turmHW(y)), head = pf >= TURM[2][0] && pf < TURM[5][0];
     const col = pf < TURM[2][0] ? ((((pf - TURM[0][0]) / .0075) | 0) & 1 ? pal.hull : pal.cabin)                 // the antenna, red and white
@@ -289,7 +336,7 @@ function towerStroke() {
       : mix(base, pal.tower, x > t.cx + hw * .15 ? .34 : .06);                                                   // the shaft, its right side in the shade
     if (head) PP.brush(t.cx - hw + U, y, t.cx + hw - U, y, 2.4 * U, mix(col, pal.cityFar, far), o);
     else { const l = (3 + R() * 6) * U, bw = Math.min(2 * hw, 2.6 * U), cx = clamp(x, t.cx - hw + bw / 2, t.cx + hw - bw / 2); o.sp = Math.min(1.1 * U, bw); PP.brush(cx, Math.max(t.y0, y - l), cx, Math.min(t.y1, y + l), bw, mix(col, pal.cityFar, far), o); }
-    if (night && head && R() < .3) { glow(towerOff(y)); light(t.cx + (R() - .5) * 1.6 * hw, py(.362), .6 * U); }
+    if (night && head && R() < .3) { towerVeil(x, y, .45); light(t.cx + (R() - .5) * 1.6 * hw, py(.362), .6 * U); }
     return;
   }
   if (t.kind === 'mast' || t.kind === 'stripe') {              // upright strokes: an antenna, a front of dark and darker ribs
@@ -306,7 +353,13 @@ function towerStroke() {
     const l = Math.max(.6, Math.min((2.5 + R() * 5) * U, w / 2 - .3)), cx = clamp(x, t.x0 + l, t.x1 - l);
     PP.brush(cx - l, Math.min(t.y1, t.y0 + (fl + .5) * fh), cx + l, Math.min(t.y1, t.y0 + (fl + .5) * fh), fh * .9, mix(col, pal.cityFar, far), o);
   }
-  if (night && R() < t.lit * .22) { const ly = t.y0 + 2 * U + R() * (t.y1 - t.y0 - 2 * U); glow(towerOff(ly)); light(t.x0 + U + R() * (w - 2 * U), ly, (.5 + R() * .4) * U); }
+  if (!night) return;
+  const cold = t.col === 'glass' || t.col === 'dark', crown = t.kind === 'glass' && R() < .1;   // offices are lit cold; the tallest has a row of lamps under its roof
+  if (!crown && R() > t.lit * .22) return;
+  const lx = crown ? t.x0 + w * (.3 + R() * .45) : t.x0 + U + R() * (w - 2 * U), ly = crown ? t.y0 + (2 + R() * 2.5) * U : t.y0 + 2 * U + R() * (t.y1 - t.y0 - 2 * U);
+  towerVeil(lx, ly, .45);
+  if (crown || (cold && R() < .55)) PP.dab(lx, ly, (.5 + R() * .4) * U, OFFICE, { a: 1, den: 3, core: 1, s: 1.2 * U, jit: 4 });
+  else light(lx, ly, (.5 + R() * .4) * U);
 }
 
 // ---------- the river ----------
@@ -546,7 +599,20 @@ function fogStroke() {
   if ((z !== WATER && z !== FAR) || fbm((x + time * 9 * U) * .003 / U, y * .012 / U + time * .008) < .4 + e * .2) return;
   levelRun(x, y, (14 + R() * 30) * U, z);
   PP.haze = null;
-  PP.brush(x - reach[0], y, x + reach[1], y + (R() - .5) * 2 * U, (3 + R() * 6) * U, fogCol(), { a: .3, jit: 3, dry: .25, sp: 2 * U, bow: .03 });
+  PP.brush(x - reach[0], y, x + reach[1], y + (R() - .5) * 2 * U, (3 + R() * 6) * U, fogCol(), { a: night ? .3 * HIGH : .3, jit: 3, dry: .25, sp: 2 * U, bow: .03 });
+}
+let fresh = null;                                              // the picture that is being painted, not the one it is painted over
+function haloDab() {                                           // the fog glowing round a red light; close to it the sky's own strokes keep out (see front)
+  const R = PP.R; let k = R() * haloArea, b = halos[0];
+  for (const o of halos) { b = o; k -= o.r * o.r; if (k <= 0) break; }
+  const a = R() * TAU, d = Math.sqrt(R()) * b.r, x = b.x + Math.cos(a) * d, y = b.y + Math.sin(a) * d;
+  if (at(x, y) !== fresh || !murk() || zone(x, y) !== SKY) return;
+  const g = clamp(redAt(x, y) * (.7 + .6 * fbm(x * .05 / U + time * .15, y * .05 / U - time * .1)));   // it billows
+  const sky = mix(skyCol(y), mix(pal.cloud, pal.cloudShade, .5), smooth(-.05, .3, dens(x, y)));       // what is behind it: the sky, or a cloud that drifts by
+  const near = d < b.r * NEAR, al = near ? .8 : clamp(g * 4, 0, .6);   // far out it is a breath of red on what the sky goes on painting there
+  if (al < .12) return;                                        // (paint that thin only makes things darker, layer on layer)
+  PP.haze = null;
+  PP.dab(x, y, clamp(b.r * (.18 + R() * .25), 2 * U, 7 * U), mix(sky, pal.beacon, g), { a: al, den: .5, core: near ? .35 : 0, s: 2.6 * U, jit: 4 });
 }
 function glintDab() {                                          // snow glittering in the sun, and the river
   const R = PP.R, x = R() * W, y = HZ + R() * (H - HZ);
@@ -560,7 +626,7 @@ function glintDab() {                                          // snow glitterin
 // ---------- the coat ----------
 function coatStroke(x, y) {                                    // a broad stroke of a fresh coat
   const R = PP.R, o = { a: .92, jit: 8, dry: 0, full: 1, sp: 2.2 * U, bow: .03 };
-  veil(towerOff(y));
+  towerVeil(x, y);
   if (y < HZ) for (const t of towers) if (x > t.x0 - 32 * U && x <= t.x1 + 32 * U && y + 20 * U > t.y0) {   // every tower that stands here: one upright stroke
     const w = t === turm ? Math.max(1.5 * U, 2 * turmHW(Math.max(y, t.y0))) : t.x1 - t.x0, cx = (t.x0 + t.x1) / 2;
     PP.brush(cx, Math.max(t.y0 + Math.min(w, 8 * U) * .2, y - 24 * U), cx, Math.min(t.y1, y + 24 * U), w, towerTone(t), { a: .95, jit: 6, dry: 0, full: 1, sp: Math.min(2.2 * U, w), bow: 0 });
@@ -586,14 +652,16 @@ function coatStroke(x, y) {                                    // a broad stroke
 }
 
 // ---------- what moves ----------
-function drawBeacons(P, t) {                                   // the red lights on the Donauturm and the tallest tower blink through the night
-  const tips = [[turm.cx, turm.y0 + 2 * U, 0], [towers[12].x0 + .5, towers[12].y0 + 2 * U, 1.9]];
-  for (let i = 0; i < tips.length; i++) {
-    const [x, y, ph] = tips[i], a = Math.pow(Math.max(0, Math.sin(t * 2.1 + ph)), 2);
-    if (!at(x, y) || !night || a < .05 || traits.fog) continue;
+function drawBeacons(P, t) {                                   // the red lights on the tall ones: the topmost blink through a clear night, in fog all of them glow
+  for (let i = 0; i < beacons.length; i++) {
+    const b = beacons[i];
+    if (!at(b.x, b.y) || !night) continue;
+    const fog = traits.fog > 0, a = fog ? .8 + .2 * Math.sin(t * .9 + b.ph) : b.k < 1 ? .7 : Math.pow(Math.max(0, Math.sin(t * 2.1 + b.ph)), 2);
+    const z = a < .05 ? -1 : zone(b.x, b.y), s = Math.sqrt(b.k);
+    if (z !== SKY && z !== TOWER) continue;                    // not behind a tree
     P.R = rng(7000 + i);                                       // each keeps its own shape while it glows
-    P.dab(x, y, 6 * U, pal.beacon, { a: a * .3, den: .5, s: 2.4 * U, jit: 3 });
-    P.dab(x, y, 1.6 * U, pal.beacon, { a, den: 2.5, core: a, s: U, jit: 3 });
+    P.dab(b.x, b.y, fog ? Math.max(6 * U * s, b.r * .4) : 6 * U * s, pal.beacon, { a: a * .3, den: .5, s: 2.4 * U, jit: 3 });
+    P.dab(b.x, b.y, 1.6 * U * s, fog ? mix(pal.beacon, pal.lights[2], .3) : pal.beacon, { a, den: 2.5, core: a, s: U, jit: 3 });
   }
 }
 function drawBarge(P, t) {                                     // now and then a barge comes down the river
@@ -612,7 +680,7 @@ function drawBarge(P, t) {                                     // now and then a
 }
 
 // ---------- the painting, one frame's worth ----------
-const RATE = { far: 9000, tower: 1, water: 7000, ship: 10000, wall: 9000, fol: 8000, tree: 1.2, yard: 6500, rail: .12, train: 9000, road: 5000, mast: 1.6, lamp: 5, glint: 90, fog: 1500 };
+const RATE = { far: 9000, tower: 1, water: 7000, ship: 10000, wall: 9000, fol: 8000, tree: 1.2, yard: 6500, rail: .12, train: 9000, road: 5000, mast: 1.6, lamp: 5, glint: 90, fog: 1500, halo: .08 };
 const place = {
   colors: {
     ballast: '#8f8b84', ballastLight: '#b5b0a5', ballastDark: '#67645f', rail: '#40373a', railShine: '#d2ccbf', sleeper: '#594d45',
@@ -621,6 +689,7 @@ const place = {
     tag: ['#2f4178', '#20242e', '#a8364a', '#2f8a94'],
   },
   seasons: { winter: { ballast: '#e6eaed', ballastLight: '#ffffff', ballastDark: '#bcc6d1', sleeper: '#c2c9d1', boxTop: '#ffffff', kerb: '#e2e6e9', road: '#5d646e' } },
+  nights: { fog: { navy: '#1d1a18', sky: ['#57514a', '#696257', '#7d776b'], cloud: ['#777064', '#6c655a', '#635d53'], haze: '#6f695e', glow: '#9a9080', fog: '#8a8477', skyDark: '#59534b' } },
   ground: /^(ballast|kerb|sleeper)/,
   hz: 0,
   layout(v) {
@@ -655,7 +724,11 @@ const place = {
     for (let i = pts.length - 1; i >= 0; i--) c.lineTo(cx + pts[i][0], pts[i][1]);
     c.closePath();
   },
-  front(s, x, y) { if (y < frontTop) return false; use(s); return maskAt(x, y) > 0 || fol(x, y) > -.05; },   // the trees on the bank reach up into the sky
+  front(s, x, y) {                                             // the trees on the bank reach up into the sky; in a night of fog the glow round a red light is nearer than the sky
+    if (s.night && s.traits.fog) for (const b of halos) if (Math.abs(x - b.x) < b.r && Math.hypot(x - b.x, y - b.y) < b.r * NEAR) return true;
+    if (y < frontTop) return false;
+    use(s); return maskAt(x, y) > 0 || fol(x, y) > -.05;
+  },
   paint(pace, s, o) {                                          // s, o: the picture and the one under it, where they show this place
     const ua = U * U * 1e6;
     clipBand(landTop, H);
@@ -675,6 +748,8 @@ const place = {
     spend('hk-lamp', RATE.lamp * pace, lampDab);
     if (s && s.traits.glint) spend('hk-glint', RATE.glint * W * (H - HZ) / ua * pace, glintDab);
     if ((s && s.traits.fog) || (o && o.traits.fog)) spend('hk-fog', RATE.fog * W * (waterFoot - HZ) / ua * pace, fogStroke);
+    fresh = s;                                                 // a glow is not painted on in a picture that is on its way out: nothing would take it off the new one
+    if (s && s.night && s.traits.fog) spend('hk-halo', RATE.halo * haloArea / (U * U) * pace, haloDab);
     PP.haze = null;
     PP.c.restore();
   },
