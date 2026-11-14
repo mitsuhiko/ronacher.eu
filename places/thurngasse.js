@@ -9,8 +9,9 @@
  *  thurngasse-map.js, loaded before this file, says for every point
  *  what there is (a wall, a window, a step), how light it is there
  *  without the sun, and where the sun falls when it shines.  The rails
- *  are too thin for that: the map has them as lines.  The trees, the
- *  lamp and the street sign are drawn by hand.  Nobody is on the stairs.
+ *  are too thin for that: the map has them as lines, and the windows
+ *  that are lit at night as shapes.  The trees, the lamp and the street
+ *  sign are drawn by hand.  Nobody is on the stairs.
  *  scene.js paints the sky and says what a place has to bring along.
  * ------------------------------------------------------------------ */
 (window.viennaPlaces = window.viennaPlaces || []).push({ id: 'thurngasse', name: 'Thurngasse', make(kit) {
@@ -42,7 +43,7 @@ const foldY = (xf, pf) => xf < 0 && pf > FOOT && pf < .8 ? FOOT : pf;
 
 // ---------- the map ----------
 // One character a cell: what it is, times eight, plus how light it is, from 0 to 7.
-const SKY = 0, WALL = 1, CREAM = 2, YELLOW = 3, WARM = 4, GLASS = 5, LIT = 6, STEP = 7, PAVE = 8, ROAD = 9, RAIL = 10, LIMB = 11, LEAVES = 12, PLATE = 13;
+const SKY = 0, WALL = 1, CREAM = 2, YELLOW = 3, WARM = 4, GLASS = 5, STEP = 6, PAVE = 7, ROAD = 8, RAIL = 10, LIMB = 11, LEAVES = 12, PLATE = 13, PANE = 14;
 const CODE = new Uint8Array(128);
 for (let c = 35, v = 0; c < 127; c++) if (c !== 92) CODE[c] = v++;
 const MW = MAP.w, MH = MAP.h, SWD = MAP.sun.w, SHT = MAP.sun.h;
@@ -64,7 +65,8 @@ function sunAt(xf, pf) {                                       // how much of th
 
 // ---------- the light ----------
 // By day the sun is on the houses on the right, unless a cloud is in its way; under a grey sky everything is as
-// light as everything else.  At night the two lamps each throw a pool of light on the stairs.
+// light as everything else.  At night the two lamps each throw a pool of light on the stairs, in which stone is
+// stone again, only yellow; and where the sun was, the moon is, if it is out.
 const LAMP = [.463, .192], FAR_LAMP = [.4325, .327];
 const POOLS = [[.455, .66, .27, .75, .95], [.432, .5, .1, 1, .6]];     // [x, y, how far around, how flat, how bright]
 const shadow = (x, y) => traits.shadow ? traits.shadow * smooth(.5, .7, fbm((x + time * 14 * U) * .0018 / U, y * .005 / U + 40)) : 0;
@@ -73,17 +75,26 @@ function glowAt(xf, pf) {
   for (const l of POOLS) { const d = Math.hypot(xf - l[0], (pf - l[1]) * l[3]) / l[2]; if (d < 1.8) g += Math.exp(-d * d * 1.7) * l[4]; }
   return g > 1 ? 1 : g;
 }
-let sunK = 0, glow = 0;                                        // what toneOf() learnt on the way: the sun and the lamplight there
+let sunK = 0, glow = 0, moon = 0, tl = 0;                      // what toneOf() learnt on the way: the sun, the lamplight and the moon there; how light the thing is
 function toneOf(x, y, xf, pf, l) {                             // where on its scale a thing of lightness l (0 to 8) is painted
-  const t = l / 8;
-  sunK = glow = 0;
-  if (night) { glow = glowAt(xf, pf); return t * .62 + .08 + glow * .26; }
+  const t = tl = l / 8;
+  sunK = glow = moon = 0;
+  if (night) {
+    glow = glowAt(xf, pf);
+    if (!traits.veiled) moon = sunAt(xf, pf) * .6;
+    return t * (.6 + moon * .3) + .07;
+  }
   if (!sunny) return t * .7 + .05;
   sunK = sunAt(xf, pf);
   if (sunK) sunK *= 1 - clamp(shadow(x, y) * 2.2);
   return t * (1 / MAP.gain + (1 - 1 / MAP.gain) * sunK) + .03;
 }
-const lightOn = col => sunK > 0 ? mix(col, pal.sunlight, sunK * .1) : glow > 0 ? mix(col, pal.lights[0], glow * .32) : col;
+const EMBER = [36, 23, 14];                                    // what is dark is dark under a lamp too
+function lightOn(col) {
+  if (sunK > 0) return mix(col, pal.sunlight, sunK * .1);
+  if (moon > 0) col = mix(col, pal.moonGlow, moon * .14);
+  return glow > 0 ? mix(col, mix(EMBER, pal.lights[0], clamp(tl + .06) * .72), Math.min(.85, glow * 1.1)) : col;
+}
 // what is far up the street is paler, and in fog or rain all the more
 const farOff = (xf, pf) => smooth(.3, .03, Math.hypot(xf - .41, (pf - .43) * 1.25));
 function hazed(col, xf, pf) {
@@ -108,6 +119,7 @@ let treeX0 = 0, treeX1 = 0, treeTop = 0, treeFoot = 0;       // the box they sta
 const limbX = (s, t) => (1 - t) * (1 - t) * s.x1 + 2 * t * (1 - t) * s.cx + t * t * s.x2;
 const limbY = (s, t) => (1 - t) * (1 - t) * s.y1 + 2 * t * (1 - t) * s.cy + t * t * s.y2;
 const hidden = (x, y) => { const xf = fx(x), pf = fy(y); return pf > HEAD || xf < corner(pf) + .001 || xf > .52; };
+const inside = (p, x, y) => { let o = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > y) !== (p[j][1] > y) && x < (p[j][0] - p[i][0]) * (y - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) o = !o; return o; };
 const maskAt = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : mask[((y / mCell) | 0) * mCols + ((x / mCell) | 0)];
 function buildTrees() {
   const crowns = []; limbs = [];
@@ -167,6 +179,42 @@ function mark(x, y, rad, v) {                                  // something thin
   }
 }
 
+// ---------- the windows ----------
+// By day a window is what the map has there.  At night it is a shape with four corners, lit or dark: the map has
+// those too, corner by corner in ten-thousandths of the photograph, for the houses near by.  Other strokes keep
+// clear of them then (3).
+let panes = [];
+function buildWindows() {
+  const q = MAP.windows;
+  panes = [];
+  for (let i = 0; i < q.length; i += 9) {
+    const pts = []; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
+    for (let k = 0; k < 8; k += 2) { const x = px(q[i + k] / 1e4), y = py(q[i + k + 1] / 1e4); pts.push([x, y]); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+    if (x1 < 0 || x0 > W || y1 < 0 || y0 > H) continue;
+    panes.push({ pts, lit: q[i + 8] === 1, x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: (pts[1][0] - pts[0][0]), h: pts[3][1] - pts[0][1], k: (i * .377) % 1 });
+    for (let cy = Math.max(0, Math.floor(y0 / mCell)); cy <= Math.min(mRows - 1, y1 / mCell); cy++) for (let cx = Math.max(0, Math.floor(x0 / mCell)); cx <= Math.min(mCols - 1, x1 / mCell); cx++)
+      if (inside(pts, (cx + .5) * mCell, (cy + .5) * mCell)) mask[cy * mCols + cx] = 3;
+  }
+}
+const along = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
+function paneStroke() {                                        // a whole window at a time
+  const R = PP.R, w = panes[(R() * panes.length) | 0];
+  if (!w || !at(clamp(w.x, 0, W - 1), clamp(w.y, 0, H - 1)) || !night) return;
+  const xf = fx(w.x), pf = fy(w.y), p = w.pts, o = { wob: .3 * U, jit: 4, hd: .7, hw: 2.4 * U, hl: w.h * .9, ang: 1.5, ha: .35, hj: 10, maxN: 5 };
+  if (!w.lit) {                                                // nobody at home: the sky in its panes, what there is of it
+    PP.shape(p, hazed(mix(ramp(pal.panes, .1), pal.skyMid, .14), xf, pf), o);
+    return;
+  }
+  const col = mix(pal.lights[0], pal.lights[2], w.k);
+  o.cols = [pal.lights[0], pal.lights[2], pal.lights[4]];
+  PP.shape(p, hazed(col, xf, pf), o);
+  if (w.w > 6 * U) {                                           // the bars between its panes, dark against the light
+    const bar = mix(pal.dark, col, .2), wd = Math.max(U, w.w * .08), lo = { a: .9, pass: 1, wob: .2 * U, step: 999, jit: 3 };
+    PP.line([along(p[0], p[1], .5), along(p[3], p[2], .5)], bar, wd, lo);
+    PP.line([along(p[0], p[3], .36), along(p[1], p[2], .36)], bar, wd, lo);
+  }
+}
+
 // ---------- the rails ----------
 // The map has them as lines: from, to, how wide, how light, in ten-thousandths of the photograph.  The bollards
 // on the pavement are among them.  A rail that leaves the photograph goes on as it left.
@@ -196,7 +244,9 @@ function railStroke() {                                        // a stretch of s
   const xf = fx(mx), pf = fy(my), behind = what(xf, pf);
   // what is behind it first, a little broader: no other stroke comes this close to a rail
   if (behind !== SKY) PP.brush(ax, ay, bx, by, s.w + 2.4 * U, hazed(lightOn(ramp(scaleOf(behind), toneOf(mx, my, xf, pf, lev + .5))), xf, pf), { a: .92, jit: 3, dry: 0, bow: 0, sp: 1.1 * U });
-  const col = hazed(lightOn(ramp(pal.steel, toneOf(mx, my, xf, pf, s.l + .3 + R() * .6) + .14)), xf, pf);
+  const tone = toneOf(mx, my, xf, pf, s.l + .3 + R() * .6) + .14;
+  tl = Math.min(1, tl + .3);                                   // steel shines under a lamp
+  const col = hazed(lightOn(ramp(pal.steel, tone)), xf, pf);
   PP.brush(ax, ay, bx, by, s.w, col, { a: .95, jit: 4, dry: 0, bow: 0, sp: Math.min(1.1 * U, s.w) });
   if (traits.snow && s.flat && R() < .7) PP.brush(ax, ay - s.w * .45, bx, by - s.w * .45, Math.max(U, s.w * .5), pal.snowy, { a: .9, jit: 3, dry: .05, bow: 0, sp: U });   // snow lies on it
 }
@@ -219,7 +269,7 @@ let zx = 0, zy = 0, zf = 0;                                    // what zone() le
 function zone(x, y) {
   const xf = zx = fx(x), pf = zy = fy(y), m = maskAt(x, y);
   if (m === 2) return RAIL;
-  if (inTrees(x, y)) {
+  if (m === 3) { if (night) return PANE; } else if (inTrees(x, y)) {
     const f = zf = bare ? -1 : fol(x, y);
     if (m && f < .15) return LIMB;
     if (f > 0) return LEAVES;
@@ -237,26 +287,22 @@ function run(x, y, ca, sa, l, ok, step) {                      // how far a stro
 // ---------- walls, windows, steps ----------
 // Everything that is built is painted in level strokes, a cell high: floor by floor, step by step.
 let cw = 1, ch = 1;                                            // how big a cell of the map is in the picture
-const LONG = [0, 9, 9, 8, 5, 3, 3, 11, 13, 15];                  // how long a stroke each kind of thing gets
+const LONG = [0, 9, 9, 8, 5, 3, 11, 13, 15];                  // how long a stroke each kind of thing gets
 function flatStroke(x, y, k) {
   const R = PP.R, xf = zx, pf = zy, l0 = lev, j = cellJ;
   // Stroke by stroke a cell high, in rows; on a big screen, where a cell is more than a stroke, the rows would show as steps
   const rows = ch < 1.7 * U, w = rows ? Math.max(1.1 * U, ch) : 1.5 * U, yc = rows ? py((j + .5) / MH) : y;
-  run(x, yc, 1, 0, (1.5 + R() * (LONG[k] - 1.5)) * Math.max(U, cw * .7), q => q === k && lev === l0, Math.max(1, cw * .5));
-  const a = reach[0], b = reach[1];
-  let col;
-  if (k === LIT && night) col = mix(mix(pal.lights[0], pal.lights[2], vnoise(xf * 40, pf * 25)), pal.dark, (7 - l0) * .035 + farOff(xf, pf) * .3);   // somebody is at home
-  else {
-    col = ramp(scaleOf(k), toneOf(x, y, xf, pf, l0 + .2 + R() * .6));
-    if (k >= STEP) {
-      const q = R();
-      if (traits.rain) col = mix(col, pal.skyLow, l0 * .03);                                         // wet stone shines
-      if (q > .985 && pf > .5 && Math.abs(xf - .4) < .3 && !night && vnoise(xf * 30, pf * 60) > .5) {   // what the tree has let fall
-        if (season === 'autumn') col = pick(pal.bits, R()); else if (season === 'spring') col = mix(col, pick(pal.accent, R()), .7);
-      }
-    } else if (k === WARM && pf < .385 && traits.snow && R() < .85) col = pal.snowy;                 // the roof at the end of the street
-    col = hazed(lightOn(col), xf, pf);
-  }
+  run(x, yc, 1, 0, (1.5 + R() * (LONG[k] - 1.5)) * Math.max(U, cw * .7), k < STEP ? q => q === k && lev === l0 : q => q === k && Math.abs(lev - l0) < 2, Math.max(1, cw * .5));   // stone is not as sharp as a window
+  const a = reach[0], b = reach[1], l = k === STEP ? 3.2 + (l0 - 3.2) * (1 - farOff(xf, pf) * .5) : l0;   // far up the stairs light and dark are closer to each other
+  let col = ramp(scaleOf(k), toneOf(x, y, xf, pf, l + .2 + R() * .6));
+  if (k >= STEP) {
+    const q = R();
+    if (traits.rain) col = mix(col, pal.skyLow, l0 * .03);                                           // wet stone shines
+    if (q > .985 && pf > .5 && Math.abs(xf - .4) < .3 && !night && vnoise(xf * 30, pf * 60) > .5) {     // what the tree has let fall
+      if (season === 'autumn') col = pick(pal.bits, R()); else if (season === 'spring') col = mix(col, pick(pal.accent, R()), .7);
+    }
+  } else if (k === WARM && pf < .385 && traits.snow && R() < .85) col = pal.snowy;                   // the roof at the end of the street
+  col = hazed(lightOn(col), xf, pf);
   PP.brush(x - a, yc, x + b, yc, w, col, { a: .96, jit: 3, dry: 0, bow: 0, sp: Math.min(1.1 * U, w) });
 }
 function landStroke(y0, y1) {                                  // somewhere between two heights
@@ -339,7 +385,7 @@ function coatStroke(x0, y0, leaves) {                          // a fresh coat: 
     if (k >= RAIL) k = what(xf, pf);                           // what is behind a rail, a tree or the sign
     if (k === SKY) continue;
     let lv = Math.max(lev, 2);
-    if (k === GLASS || k === LIT) { k = WALL; lv = 3; }
+    if (k === GLASS) { k = WALL; lv = 3; }
     const col = hazed(lightOn(ramp(scaleOf(k), toneOf(xc, yc, xf, pf, lv + .5))), xf, pf);
     if (k >= STEP) PP.brush(x - l, y, x + l, y, 22 * U, col, o);
     else PP.brush(x, y - l * .8, x, y + l * .8, 24 * U, col, o);                                    // a house: an upright stroke
@@ -378,7 +424,7 @@ function drawLamps(P, t) {
 
 // ---------- the painting, one frame's worth ----------
 let tops = null, skyX0 = 0, skyX1 = 0;
-const RATE = { land: 20000, rail: 1.5, leaf: 9000, limb: 1.2, sign: 9000, fog: 1500 };
+const RATE = { land: 20000, rail: 1.5, pane: .8, leaf: 9000, limb: 1.2, sign: 9000, fog: 1500 };
 const place = {
   colors: {
     walls: ['#2c3037', '#585c64', '#8a8a89', '#b4afa7', '#dfd9cd', '#fcf8ef'], creams: ['#2e2a26', '#5e5548', '#8f8370', '#b8a98f', '#dfcfb0', '#f6ead0'],
@@ -416,7 +462,7 @@ const place = {
       tops[i] = roof ? py(roof / MH) : -1e4;
       if (roof) { if (i < skyX0) skyX0 = i; skyX1 = i; }
     }
-    buildTrees(); buildRails();
+    buildTrees(); buildWindows(); buildRails();
   },
   tick(t) { time = t; },
   top(x) { return tops[x < 0 ? 0 : x >= tops.length ? tops.length - 1 : x | 0] - U; },
@@ -435,6 +481,7 @@ const place = {
     clipBand(0, H);
     for (let n = 0; n < 3; n++) spend('tg-land' + n, RATE.land * W * H / 3 / ua * pace, BANDS[n]);
     spend('tg-rail', RATE.rail * railLength / (13 * U) * pace, railStroke);
+    if ((s && s.night) || (o && o.night)) spend('tg-pane', RATE.pane * panes.length * pace, paneStroke);
     spend('tg-limb', RATE.limb * limbLength / (14 * U) * pace, limbStroke);
     if (leafy) spend('tg-leaf', RATE.leaf * leafArea / ua * pace, leafDab);
     spend('tg-sign', RATE.sign * (SIGN[1] - SIGN[0]) * PW * (SIGN[3] - SIGN[2]) * PH / ua * pace, signStroke);
