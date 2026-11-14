@@ -43,6 +43,17 @@ const TRACKS = [.768, .8, .832, .866, .934, .988], GAUGE = .013;
 const EDGE = .745, BOX = .735, DECK = .787, WHEELS = .805, FENCE = 1.045, ROADV = 1.17, LANE = 1.3;
 const yardEdge = xf => EDGE + (vnoise(xf * 40, 7.7) - .5) * .01;
 
+// How far off a thing is: 0 at our feet, 1 on the far bank.  In fog everything pales by that: whoever paints says
+// how far off the thing is, and the brush mixes the fog in.  The yard and the river are level ground, where it is
+// a matter of how close to the horizon a point lies; what stands upright is as far off as its foot.
+const flatOff = pf => .06 / (.06 + Math.max(0, pf - VY));
+const FAR_OFF = .72, TREE_OFF = flatOff(.61);
+const towerOff = y => .62 - .24 * clamp((SHORE - fy(y)) / .2);   // the fog lies on the river: the towers rise out of it
+const fogCol = () => night ? mix(pal.skyLow, pal.fog, .35) : pal.fog;   // by night it is no lighter than the sky
+const hazeOf = (d, k) => traits.fog ? [fogCol(), clamp(d * 1.4 - .1, 0, .85) * traits.fog * (k || 1)] : null;
+const veil = d => { PP.haze = hazeOf(d); };
+const glow = d => { PP.haze = hazeOf(d, .45); };                // a light carries through the fog
+
 const QUAY = [.577, .8], LOW = [.712, .17];                    // the wall along the water: its top, its end (in the tall trees); the low one by the tracks: its line, its end
 const SHIP = [.458, .748, .553, .58, .47, .735, .532];         // the ship at the quay, its waterline behind the wall: hull from, to, its top, its foot; the decks from, to, their top
 // where the bushes on the near bank begin: under the wall on the left, tall trees on the right
@@ -144,9 +155,11 @@ const MASTS = [[.301, .502, .726, 1, 'arm'], [.372, .513, .9, 1.5, 'arms'], [.34
   [.539, .572, .734, .7, 'signal'], [.733, .51, .734, .8, 'arm'], [.97, .52, .877, 1.1, 'lamp'], [.171, .64, .76, .8, 'signal']];
 function buildMasts() {
   masts = []; lamps = []; mastLength = 0;
-  const seg = (x1, y1, x2, y2, w) => { const len = Math.hypot(x2 - x1, y2 - y1); masts.push({ x1, y1, x2, y2, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2, w, len }); mastLength += len; };
+  let off = 0;                                                 // how far off the mast stands whose parts are being added
+  const seg = (x1, y1, x2, y2, w) => { const len = Math.hypot(x2 - x1, y2 - y1); masts.push({ x1, y1, x2, y2, cx: (x1 + x2) / 2, cy: (y1 + y2) / 2, w, len, off }); mastLength += len; };
   for (const [xf, top, foot, wd, what] of MASTS) {
     const x = px(xf), y0 = py(top), y1 = Math.min(H + 10 * U, py(lineY(foot, xf))), w = Math.max(1.2 * U, wd * .0034 * WU), a = .012 * PH, t = Math.max(.9 * U, w * .35);
+    off = flatOff(lineY(foot, xf));
     seg(x, y0, x, y1, w);
     if (what === 'arms') { seg(x, y0 + 9 * a, x + 3 * a, y0 + 9 * a, t); seg(x, y0 + 7.8 * a, x + 3 * a, y0 + 9 * a, t * .8); }   // what holds the wire over the track
     else if (what === 'arm') { seg(x, y0 + 1.8 * a, x + 2 * a, y0 + 1.8 * a, t); seg(x, y0 + .6 * a, x + 2 * a, y0 + 1.8 * a, t * .8); }
@@ -244,7 +257,7 @@ function farTone(x, y, f) {                                    // the trees over
   const n = vnoise(x * .05 / U + 11, y * .09 / U);
   let c = mix(pal.folMid, n > .5 ? pal.folLight : pal.folDark, Math.abs(n - .5) * 1.5);
   if (f < .2) c = mix(c, pal.folDeep, .45);
-  return mix(c, pal.haze, .3 + traits.fog * .3);
+  return mix(c, pal.haze, .3);
 }
 const LAMPS = .043;                                            // lamps along the far shore, one about every so often
 const shoreLamp = x => { const i = Math.round(fx(x) / LAMPS); return px((i + (hash1(i * 7 + 1) - .5) * .6) * LAMPS); };
@@ -254,19 +267,21 @@ function farStroke() {
   const f = (HZ - y) / h, k = R();
   let col = farTone(x, y, f);
   if (f > .55 && k < .4) col = mix(col, pal.folSun, .45); else if (pal.accent && k > .93) col = mix(pick(pal.accent, R()), pal.haze, .25);
+  veil(FAR_OFF);
   PP.dab(x, y, (1.4 + R() * 2.4) * U, col, { a: .9, den: .8, core: .6, s: 1.6 * U });
-  if (night) { const lx = shoreLamp(x); if (Math.abs(x - lx) < 5 * U && R() < .5) light(lx, HZ - .004 * PH, (.6 + R() * .4) * U); }
+  if (night) { const lx = shoreLamp(x); if (Math.abs(x - lx) < 5 * U && R() < .5) { glow(FAR_OFF); light(lx, HZ - .004 * PH, (.6 + R() * .4) * U); } }
 }
 
-function towerTone(t) { return mix(t.col === 'sand' ? pal.city[7] : pal[t.col], pal.cityFar, .2 + traits.fog * .3 + traits.rain * .08); }
+function towerTone(t) { return mix(t.col === 'sand' ? pal.city[7] : pal[t.col], pal.cityFar, .2 + traits.rain * .08); }
 function towerStroke() {
   const R = PP.R; let k = R() * towerWeight, t = towers[0];
   for (const o of towers) { t = o; k -= o.wt; if (k <= 0) break; }
   const x = t.x0 + R() * (t.x1 - t.x0), y = t.y0 + R() * (t.y1 - t.y0);
   if (!at(x, y) || zone(x, y) !== TOWER || zt !== t) return;
-  const w = t.x1 - t.x0, u = (x - t.x0) / w, fh = 3.4 * U, fl = Math.floor((y - t.y0) / fh), far = .2 + traits.fog * .3 + traits.rain * .08;
+  const w = t.x1 - t.x0, u = (x - t.x0) / w, fh = 3.4 * U, fl = Math.floor((y - t.y0) / fh), far = .2 + traits.rain * .08;
   const o = { a: .92, jit: 6, dry: .04, bow: 0, sp: 1.1 * U };
   const base = t.col === 'sand' ? pal.city[7] : pal[t.col];
+  veil(towerOff(y));
   if (t === turm) {
     const pf = fy(y), hw = Math.max(.7 * U, turmHW(y)), head = pf >= TURM[2][0] && pf < TURM[5][0];
     const col = pf < TURM[2][0] ? ((((pf - TURM[0][0]) / .0075) | 0) & 1 ? pal.hull : pal.cabin)                 // the antenna, red and white
@@ -274,7 +289,7 @@ function towerStroke() {
       : mix(base, pal.tower, x > t.cx + hw * .15 ? .34 : .06);                                                   // the shaft, its right side in the shade
     if (head) PP.brush(t.cx - hw + U, y, t.cx + hw - U, y, 2.4 * U, mix(col, pal.cityFar, far), o);
     else { const l = (3 + R() * 6) * U, bw = Math.min(2 * hw, 2.6 * U), cx = clamp(x, t.cx - hw + bw / 2, t.cx + hw - bw / 2); o.sp = Math.min(1.1 * U, bw); PP.brush(cx, Math.max(t.y0, y - l), cx, Math.min(t.y1, y + l), bw, mix(col, pal.cityFar, far), o); }
-    if (night && head && R() < .3) light(t.cx + (R() - .5) * 1.6 * hw, py(.362), .6 * U);
+    if (night && head && R() < .3) { glow(towerOff(y)); light(t.cx + (R() - .5) * 1.6 * hw, py(.362), .6 * U); }
     return;
   }
   if (t.kind === 'mast' || t.kind === 'stripe') {              // upright strokes: an antenna, a front of dark and darker ribs
@@ -291,7 +306,7 @@ function towerStroke() {
     const l = Math.max(.6, Math.min((2.5 + R() * 5) * U, w / 2 - .3)), cx = clamp(x, t.x0 + l, t.x1 - l);
     PP.brush(cx - l, Math.min(t.y1, t.y0 + (fl + .5) * fh), cx + l, Math.min(t.y1, t.y0 + (fl + .5) * fh), fh * .9, mix(col, pal.cityFar, far), o);
   }
-  if (night && R() < t.lit * .22) light(t.x0 + U + R() * (w - 2 * U), t.y0 + 2 * U + R() * (t.y1 - t.y0 - 2 * U), (.5 + R() * .4) * U);
+  if (night && R() < t.lit * .22) { const ly = t.y0 + 2 * U + R() * (t.y1 - t.y0 - 2 * U); glow(towerOff(ly)); light(t.x0 + U + R() * (w - 2 * U), ly, (.5 + R() * .4) * U); }
 }
 
 // ---------- the river ----------
@@ -305,17 +320,20 @@ function waterStroke() {
   if (f < .32) col = mix(col, farTone(x, 2 * HZ - y, .5), (1 - f / .32) * .5);                 // the far bank, mirrored
   const sd = shadow(x, y); if (sd) col = mix(col, pal.waterDark, sd * .5);
   levelRun(x, y, (8 + R() * 22) * sz, WATER);
+  veil(flatOff(fy(y)));
   PP.brush(x - reach[0], y, x + reach[1], y + (R() - .5) * U, (1.4 + R() * 2.2) * sz, col, { a: .85, jit: 6, dry: .15, sp: 1.1 * U, bow: 0 });
-  if (night) { const lx = shoreLamp(x); if (Math.abs(x - lx) < 3 * U && f < .75 && R() < .6) PP.brush(lx, y - 3 * sz, lx, y + 4 * sz, 1.5 * U, pick(pal.lights, R()), { a: .5 * (1 - f), sp: U, bow: 0 }); }
+  if (night) { const lx = shoreLamp(x); if (Math.abs(x - lx) < 3 * U && f < .75 && R() < .6) { glow(FAR_OFF); PP.brush(lx, y - 3 * sz, lx, y + 4 * sz, 1.5 * U, pick(pal.lights, R()), { a: .5 * (1 - f), sp: U, bow: 0 }); } }
 }
 
 function shipStroke() {                                        // the river cruiser moored at the quay
   const R = PP.R, x = px(SHIP[0] + R() * (SHIP[1] - SHIP[0])), top = py(SHIP[6]), h = py(SHIP[3]) - top, y = top + R() * h;
   if (!at(x, y) || zone(x, y) !== BOAT) return;
   const t = (y - top) / h, pitch = 3.2 * U, cell = Math.floor(x / pitch), row = t > .2 && t < .4 ? 1 : t > .52 && t < .7 ? 2 : 0;
-  const o = { a: .93, jit: 5, dry: .04, bow: 0, sp: 1.1 * U };
+  const o = { a: .93, jit: 5, dry: .04, bow: 0, sp: 1.1 * U }, off = flatOff(QUAY[0]);
+  veil(off);
   if (row && (cell & 1)) {                                     // a window: dark by day, most of them lit at night
     const lit = night && hash1(cell * 31 + row * 7) < .65, yc = top + (row === 1 ? .3 : .61) * h;
+    if (lit) glow(off);
     PP.brush((cell + .5) * pitch - U, yc, (cell + .5) * pitch + U, yc, h * .15, lit ? pal.lights[(cell + row) % pal.lights.length] : mix(pal.dark, pal.glass, .3), o);
     return;
   }
@@ -349,6 +367,7 @@ function wallStroke() {
   else if (t < .1) col = mix(col, low ? pal.towerLight : pal.dark, .5); else if (t < .2) col = mix(col, pal.towerLight, .45); else if (t > .8) col = mix(col, pal.stone, .35);
   const g = tag(xf, t, low), l = g ? 1.6 * U : (3 + R() * 7) * U;
   if (g) col = mix(pal.tag[g - 1], col, low ? .25 : .1);
+  veil(flatOff(pf));
   PP.brush(x - l, y, x + l, y, g ? 1.7 * U : (1.4 + R() * 1.4) * U, col, { a: .9, jit: 6, dry: .06, bow: 0, sp: 1.1 * U });
 }
 
@@ -370,6 +389,7 @@ function leaf(x, y) {
   if (z === MAST || z === ROAD || z === TRAIN || z === YARD || z === TREE || (z === WALL && zx < LOW[1] && zv >= LOW[0]) || d < -.08) return;
   const tree = folTree, deep = clamp((y - line) / (.08 * PH)), sz = (tree ? .5 : .55 + deep * .2) * U, k = R();
   const lum = clamp(folLum(x, y) + (smooth(.45, .8, zx) - .6) * .3 - (tree ? -.1 : deep * .22));
+  veil(tree ? TREE_OFF : flatOff(Math.max(.6, fy(y))));     // the tall ones on the right stand where the bushes do
   if (d < .12) {                                               // the ragged rim: single leaves
     PP.dab(x, y, (2.5 + R() * 5) * sz, traits.bare ? pal.folDark : lum > .5 ? pal.folMid : pal.folDark, { a: .85, den: .3, s: 2.4 * U });
     return;
@@ -394,6 +414,7 @@ function treeStroke() {                                        // a stretch of b
   const mx = limbX(s, tm), my = limbY(s, tm);
   if (!at(mx, my) || zone(mx, my) !== TREE) return;            // not where its own leaves hide it
   const bark = mix(pal.trunk, pal.towerLight, s.depth < 2 ? .16 : .06), q = R();
+  veil(TREE_OFF);
   const o = { a: .93, jit: 8, dry: .06, sp: Math.min(1.2 * U, s.w), bow: .03 };
   for (const [a, b] of [[t0, tm], [tm, t1]]) {
     const ax = limbX(s, a), ay = limbY(s, a), bx = limbX(s, b), by = limbY(s, b);
@@ -410,6 +431,7 @@ function yardStroke() {
   if (!at(x, y) || zone(x, y) !== YARD) return;
   const xf = zx, v = zv, q = (VX - xf) / VX, sz = (.5 + clamp((v - EDGE) / .3) * .6) * U;
   dirAt(v); const ca = lineDir[0], sa = lineDir[1];
+  veil(flatOff(fy(y)));
   let tk = -1, rail = 1; for (let i = 0; i < TRACKS.length; i++) { const d = Math.abs(v - TRACKS[i]); if (d < GAUGE) tk = i; rail = Math.min(rail, Math.abs(d - GAUGE / 2)); }
   const off = rail * q * PH;                                   // how far the nearest rail is, in pixels
   if (tk >= 0 && off < 1.3 * sz) return;                       // a rail: see railStroke
@@ -441,7 +463,7 @@ function railStroke() {                                        // every stroke l
   const R = PP.R, tk = (R() * TRACKS.length) | 0, vr = TRACKS[tk] + (R() < .5 ? -1 : 1) * GAUGE / 2, x = R() * W, y = py(lineY(vr, fx(x)));
   if (y >= H || !at(x, y) || zone(x, y) !== YARD) return;
   const sz = (.55 + clamp((vr - EDGE) / .3) * .6) * U, o = { a: .95, jit: 5, dry: .03, sp: Math.min(U, sz), bow: 0 };
-  dirAt(vr);
+  dirAt(vr); veil(flatOff(fy(y)));
   clearRun(x, y, lineDir[0], lineDir[1], (12 + R() * 26) * U, 2);
   const xa = x - lineDir[0] * reach[0];
   let xb = x + lineDir[0] * reach[1];
@@ -456,6 +478,7 @@ function trainStroke() {
   if (!at(x, y) || maskAt(x, y) === 2) return;
   const s = along(xf), n = Math.floor(s), u = s - n, o = { a: .93, jit: 6, dry: .04, bow: 0, sp: 1.1 * U };
   dirAt(v); const ca = lineDir[0], sa = lineDir[1];
+  veil(flatOff(fy(y)));
   if (v >= DECK) {                                             // the wagon under it: its frame, the wheels, the dark between them
     const l = (4 + R() * 8) * U, wheel = v > DECK + .005 && Math.abs(u - .5) > .26 && Math.abs(u - .5) < .42;
     clearRun(x, y, ca, sa, l, 2);
@@ -484,12 +507,14 @@ function mastStroke() {
   const span = Math.min(1, (8 + R() * 18) * U / s.len), t0 = R() * (1 - span), t1 = t0 + span;
   const ax = s.x1 + (s.x2 - s.x1) * t0, ay = s.y1 + (s.y2 - s.y1) * t0, bx = s.x1 + (s.x2 - s.x1) * t1, by = s.y1 + (s.y2 - s.y1) * t1;
   if (!at((ax + bx) / 2, Math.min(H - 1, (ay + by) / 2))) return;
+  veil(s.off);
   PP.brush(ax, ay, bx, by, s.w, pal.mast, { a: .95, jit: 6, dry: .04, sp: Math.min(1.1 * U, s.w), bow: 0 });
   if (s.w > 2.2 * U && R() < .6) PP.brush(ax - s.w * .28, ay, bx - s.w * .28, by, s.w * .3, traits.bare ? pal.folLight : pal.mastLight, { a: .8, jit: 5, dry: .04, sp: Math.min(1.1 * U, s.w * .3), bow: 0 });   // its sunny side
 }
 function lampDab() {                                           // the lamp over the yard, the signals
   const R = PP.R, l = pick(lamps, R());
   if (!l || !at(l.x, l.y)) return;
+  PP.haze = null;                                              // a light is seen through any fog
   if (l.red) PP.dab(l.x, l.y, l.r * U, pal.beacon, { a: 1, den: 3, core: 1, s: U, jit: 3 });
   else if (!night) PP.dab(l.x, l.y, l.r * U, pal.towerLight, { a: 1, den: 2.5, core: .9, s: U, jit: 4 });
   else { PP.dab(l.x, l.y + 5 * U, 10 * U, pal.lights[0], { a: .12, den: .4, s: 3 * U, jit: 3 }); light(l.x, l.y, l.r * U); }
@@ -501,6 +526,7 @@ function roadStroke() {                                        // the fence alon
   if (x < 0 || !at(x, y) || zone(x, y) !== ROAD) return;
   const xf = zx, v = zv, n = fbm(x * .02 / U + 9, y * .05 / U);
   dirAt(v); const ca = lineDir[0], sa = lineDir[1];
+  veil(flatOff(fy(y)));
   let col, w = (3 + R() * 4) * U, l = (8 + R() * 16) * U, yc = y;
   if (v < FENCE + .016) { const rail = Math.abs(v - FENCE - .008) > .004; col = rail ? pal.mast : mix(pal.ballastDark, pal.deck, .4); w = rail ? 1.2 * U : 2 * U; }
   else if (v < ROADV) col = mix(pal.kerb, v > ROADV - .014 ? pal.towerLight : pal.ballastDark, v > ROADV - .014 ? .4 : n * .5);
@@ -511,33 +537,40 @@ function roadStroke() {                                        // the fence alon
 }
 
 // ---------- weather ----------
-function fogStroke() {                                         // fog lies on the river in drifting banks, and creeps over the tracks
-  const R = PP.R, x = R() * W, depth = R(), y = HZ - .07 * PH + depth * .3 * PH;
+// Fog is not a thing that stands somewhere: it is between us and everything, and the more of it the farther off
+// a thing is.  That is veil()'s work.  On the river it lies thickest, in banks that drift.
+function fogStroke() {
+  const R = PP.R, x = R() * W, y = HZ - .012 * PH + R() * (waterFoot - HZ + .012 * PH);
   if (!at(x, y) || !traits.fog) return;
-  const z = zone(x, y);
-  if (z === MAST || z === TREE || z === TRAIN || z === ROAD || (z === YARD && zv > .9)) return;
-  if (fbm((x + time * 9 * U) * .003 / U, y * .012 / U + time * .008) + (1 - depth) * .22 < .5) return;
-  PP.dab(x, y, (8 + R() * 16) * U, pal.fog, { a: .5, den: .22, s: 4 * U, sx: 2.6, sy: .7, core: .1, jit: 4 });
+  const z = zone(x, y), e = Math.abs((y - HZ) / (waterFoot - HZ) - .4) / .6;   // thinning out towards the banks
+  if ((z !== WATER && z !== FAR) || fbm((x + time * 9 * U) * .003 / U, y * .012 / U + time * .008) < .4 + e * .2) return;
+  levelRun(x, y, (14 + R() * 30) * U, z);
+  PP.haze = null;
+  PP.brush(x - reach[0], y, x + reach[1], y + (R() - .5) * 2 * U, (3 + R() * 6) * U, fogCol(), { a: .3, jit: 3, dry: .25, sp: 2 * U, bow: .03 });
 }
 function glintDab() {                                          // snow glittering in the sun, and the river
   const R = PP.R, x = R() * W, y = HZ + R() * (H - HZ);
   if (!at(x, y) || !traits.glint) return;
   const z = zone(x, y);
   if (z !== YARD && z !== WATER) return;
+  PP.haze = null;
   PP.dab(x, y, (.7 + R() * .9) * U, pal.sun, { a: 1, den: 3, core: 1, s: U, jit: 2 });
 }
 
 // ---------- the coat ----------
 function coatStroke(x, y) {                                    // a broad stroke of a fresh coat
   const R = PP.R, o = { a: .92, jit: 8, dry: 0, full: 1, sp: 2.2 * U, bow: .03 };
+  veil(towerOff(y));
   if (y < HZ) for (const t of towers) if (x > t.x0 - 32 * U && x <= t.x1 + 32 * U && y + 20 * U > t.y0) {   // every tower that stands here: one upright stroke
     const w = t === turm ? Math.max(1.5 * U, 2 * turmHW(Math.max(y, t.y0))) : t.x1 - t.x0, cx = (t.x0 + t.x1) / 2;
     PP.brush(cx, Math.max(t.y0 + Math.min(w, 8 * U) * .2, y - 24 * U), cx, Math.min(t.y1, y + 24 * U), w, towerTone(t), { a: .95, jit: 6, dry: 0, full: 1, sp: Math.min(2.2 * U, w), bow: 0 });
   }
   const z = zone(x, Math.min(y, H - 1), true), l = (40 + R() * 40) * U;
+  veil(FAR_OFF);
   if (y > HZ - 60 * U && y < HZ + 22 * U) { const h = farH(x); PP.brush(x - l, HZ - h * .45, x + l, HZ - h * .45, h, farTone(x, HZ - h * .45, .5), o); }   // the far bank is a narrow band: every stroke near it lays some of it
   if (z === SKY || z === TOWER || z === FAR) return;
   dirAt(zv); const ca = lineDir[0], sa = lineDir[1];
+  veil(z === BOAT ? flatOff(QUAY[0]) : z === BANK ? flatOff(Math.max(.6, fy(y))) : flatOff(fy(y)));
   if (z === WATER) PP.brush(x - l, y, x + l, y, Math.min(36 * U, .05 * PH), pal.water, o);
   else if (z === BOAT) PP.brush(x - l, y, x + l, y, .02 * PH, night ? mix(pal.hull, pal.dark, .45) : pal.hull, o);
   else if (z === WALL) PP.brush(x - l, y, x + l, y, .03 * PH, mix(pal.concrete, pal.stone, .15), o);
@@ -569,11 +602,13 @@ function drawBarge(P, t) {                                     // now and then a
   for (let i = -4; i < n; i++) {
     const xa = x0 + i / n * len, xb = xa + len / n + 1.5 * U, xm = (xa + xb) / 2;
     if (!at(xm, y) || zone(xm, y) !== WATER) continue;         // behind the trees and the masts it is not to be seen
+    P.haze = hazeOf(flatOff(.541));
     if (i < 0) { P.brush(xa, y + h * .7, xb, y + h * .7 + (i & 1 ? U : 0), 1.2 * U, pal.waterLight, { a: .6 + i * .12, sp: U, dry: .2, bow: .2 }); continue; }   // the wave at its bow
     P.brush(xa, y, xb, y, h, mix(pal.dark, pal.stone, .3), o);
     if (i >= n - 2) { P.brush(xa, y - h * 1.1, xb, y - h * 1.1, h * 1.3, pal.hull, o); if (night && i === n - 2) P.dab(xm, y - h * 1.2, U, pal.lights[2], { a: 1, den: 3, core: 1, s: U }); }   // the wheelhouse at the stern
     else if (i > 0) P.brush(xa, y - h * .8, xb, y - h * .8, h * .7, pal.box[(i >> 1) % pal.box.length], o);
   }
+  P.haze = null;
 }
 
 // ---------- the painting, one frame's worth ----------
@@ -639,7 +674,8 @@ const place = {
     spend('hk-mast', RATE.mast * mastLength / (14 * U) * pace, mastStroke);
     spend('hk-lamp', RATE.lamp * pace, lampDab);
     if (s && s.traits.glint) spend('hk-glint', RATE.glint * W * (H - HZ) / ua * pace, glintDab);
-    if ((s && s.traits.fog) || (o && o.traits.fog)) spend('hk-fog', RATE.fog * W * .3 * PH / ua * pace, fogStroke);
+    if ((s && s.traits.fog) || (o && o.traits.fog)) spend('hk-fog', RATE.fog * W * (waterFoot - HZ) / ua * pace, fogStroke);
+    PP.haze = null;
     PP.c.restore();
   },
   coat(cells, i, j, s) {                                       // the land's share of a fresh coat: everything that is not sky
@@ -647,6 +683,7 @@ const place = {
     use(s);
     c.save(); c.beginPath(); c.rect(0, 0, W, H); place.sky(c, 8 * U); c.clip('evenodd');
     for (let k = i; k < j; k++) if (cells[k].y > landTop - 20 * U) coatStroke(cells[k].x, cells[k].y);
+    PP.haze = null;
     c.restore();
   },
   sprites: [{ draw: drawBarge, t0: 4, seed: 111 }, { draw: drawBeacons, t0: 4, seed: 112 }],
