@@ -40,21 +40,27 @@ const WEATHERS = {
 };
 const WEATHER_NAMES = ['sunny', 'fair', 'cloudy', 'rain', 'storm', 'fog', 'golden', 'snow', 'frost'];
 const SEASON_SECONDS = parseFloat(qs.get('every') || '60');
+// The order of chance everything is picked in, from the first picture on.  ?seed= makes it the same every time.
+const ROLL = rng(qs.has('seed') ? parseInt(qs.get('seed'), 10) || 0 : (Math.random() * 4294967296) >>> 0);
+const roll = n => Math.min(n - 1, (ROLL() * n) | 0);
+
+// The first picture is one of chance: any place, season and weather, by day or night as the
+// theme wants.  ?place=, ?season= and ?weather= pin what they name, the rest is still chance.
+const askedWeather = WEATHER_NAMES.includes(qs.get('weather')) ? qs.get('weather') : null;
 let seasonIndex = SEASONS.indexOf(qs.get('season'));
-if (seasonIndex < 0) seasonIndex = [3, 3, 0, 0, 0, 1, 1, 1, 2, 2, 2, 3][new Date().getMonth()];
+if (seasonIndex < 0) {
+  const fits = askedWeather ? SEASONS.map((s, i) => i).filter(i => WEATHERS[SEASONS[i]].includes(askedWeather)) : [0, 1, 2, 3];
+  seasonIndex = fits.length ? fits[roll(fits.length)] : roll(SEASONS.length);
+}
 const weatherAt = [-1, -1, -1, -1];                            // how far each season has got through its weathers
-weatherAt[seasonIndex] = 0;
-let weather = WEATHERS[SEASONS[seasonIndex]][0];
-if (WEATHER_NAMES.includes(qs.get('weather'))) { weather = qs.get('weather'); weatherAt[seasonIndex] = Math.max(0, WEATHERS[SEASONS[seasonIndex]].indexOf(weather)); }
+{ const list = WEATHERS[SEASONS[seasonIndex]];
+  weatherAt[seasonIndex] = askedWeather ? Math.max(0, list.indexOf(askedWeather)) : roll(list.length); }
+let weather = askedWeather || WEATHERS[SEASONS[seasonIndex]][weatherAt[seasonIndex]];
 
 // The places one can look at: each has put { id, name, make } on the list, in the order of its script tag.
-const PLACE_KEY = 'ronacher-place';
 const PLACES = window.viennaPlaces || [];
-let placeIndex = -1;
-{ let id = null;
-  try { id = localStorage.getItem(PLACE_KEY); } catch (e) { /* private mode */ }
-  if (qs.get('place')) id = qs.get('place');
-  placeIndex = Math.max(0, PLACES.findIndex(p => p.id === id)); }
+let placeIndex = PLACES.findIndex(p => p.id === qs.get('place'));
+if (placeIndex < 0) placeIndex = PLACES.length ? roll(PLACES.length) : 0;
 
 const themeButton = document.getElementById('theme-toggle');
 const placeButton = document.getElementById('place-toggle');
@@ -949,7 +955,6 @@ function resize() {
 // order of chance, before any of them comes again; the buttons and a click on the picture
 // go straight to the next one.  ?seed= makes the order the same every time.
 let seasonClock = 0;
-const ROLL = rng(qs.has('seed') ? parseInt(qs.get('seed'), 10) || 0 : (Math.random() * 4294967296) >>> 0);
 const sceneKey = (p, s, w) => p + '/' + s + '/' + w;
 const ALL_SCENES = [];
 for (let p = 0; p < places.length; p++) for (let s = 0; s < SEASONS.length; s++) for (const w of WEATHERS[SEASONS[s]]) ALL_SCENES.push({ p, s, w });
@@ -973,7 +978,6 @@ function nextWeather() { turn(seasonIndex, true); show(3.5); }
 function nextSeason() { turn((seasonIndex + 1) % SEASONS.length, false); show(4.5); }
 function nextPlace() {
   placeIndex = (placeIndex + 1) % places.length;
-  try { localStorage.setItem(PLACE_KEY, PLACES[placeIndex].id); } catch (e) { /* ignore */ }
   show(4.5);
 }
 function nextScene() {
