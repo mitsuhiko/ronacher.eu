@@ -686,7 +686,7 @@ const place = {
     c.save(); c.beginPath(); hedgePath(c, false); c.clip();    // the hedge takes the tower's place there
     for (let k = i; k < j; k++) hedgeCoat(cells[k].x, cells[k].y);
     c.restore();
-    for (let k = i; k < j; k++) if (cells[k].y > landTop - 20 * U) for (let n = -1; n < 2; n++) coatStroke(cells[k].x + n * 22 * U, cells[k].y + n * 14 * U);   // thrice over: nothing of the old picture is to show through, however narrow a strip
+    for (let k = i; k < j; k++) if (cells[k].y > landTop - 20 * U) for (let n = -1; n < 2; n++) coatStroke(cells[k].x + n * 22 * U, cells[k].y + n * 14 * U);   // thrice over: nothing of the wash under it is to show through, however narrow a strip
     PP.haze = null;
     c.restore();
   },

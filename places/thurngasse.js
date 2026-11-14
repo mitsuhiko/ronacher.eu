@@ -506,7 +506,7 @@ const place = {
     const c = PP.c;
     use(s);
     c.save(); c.beginPath(); c.rect(0, 0, W, H); place.sky(c, 8 * U); c.clip('evenodd');
-    for (let k = i; k < j; k++) for (let n = -1; n < 2; n++) coatStroke(cells[k].x + n * 22 * U, cells[k].y + n * 14 * U, false);   // thrice over: nothing of the old picture is to show through
+    for (let k = i; k < j; k++) for (let n = -1; n < 2; n++) coatStroke(cells[k].x + n * 22 * U, cells[k].y + n * 14 * U, false);   // thrice over: nothing of the wash under it is to show through
     c.restore();
     if (!bare) for (let k = i; k < j; k++) if (cells[k].y < treeFoot + 20 * U && cells[k].x > treeX0 - 40 * U && cells[k].x < treeX1 + 40 * U) coatStroke(cells[k].x, cells[k].y, true);
   },

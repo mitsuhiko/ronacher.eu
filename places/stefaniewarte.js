@@ -672,7 +672,7 @@ function fogStroke() {                                         // fog hangs betw
 // ---------- the coat ----------
 function towerPath(c) { c.moveTo(OUT[0][0], OUT[0][1]); for (let i = 1; i < OUT.length; i++) c.lineTo(OUT[i][0], OUT[i][1]); c.closePath(); }
 let lagCells = null, lagAt = 0;                                // the cells of the coat that is being brushed, how many of them have had their second one
-function coatStroke(x0, y0, tower, again) {                    // a fresh coat: broad strokes of what is there, where the brush comes by.  Nothing of the old picture is to show through
+function coatStroke(x0, y0, tower, again) {                    // a fresh coat: broad strokes of what is there, where the brush comes by.  Nothing of the wash under it is to show through
   const R = PP.R;
   for (let n = 0; n < 9; n++) {
     const x = x0 + (n % 3 - 1 + (R() - .5) * .5) * 21 * U, y = y0 + ((n / 3 | 0) - 1 + (R() - .5) * .5) * 13 * U;

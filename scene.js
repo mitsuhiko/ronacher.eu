@@ -6,8 +6,9 @@
  *  chalk dabs are sampled from the scene as it is right now (drifting
  *  clouds, their shadows, wind in the leaves, the palette of the
  *  season) and laid over whatever is already there.  A new season, day
- *  turning into night or another place is a fresh coat brushed across
- *  the old picture.  Only the few things that really move are redrawn
+ *  turning into night or another place is first a wash of broad swaths
+ *  that cleans the old picture away, then a fresh coat brushed across
+ *  it close behind.  Only the few things that really move are redrawn
  *  from scratch each frame, on a second canvas on top.
  *
  *  This file has the paint box, the seasons, the weather and the sky.
@@ -515,10 +516,11 @@ function mkScene(place, season, name, isNight) {
   return s;
 }
 function use(s) { pal = s.pal; clouds = s.clouds; night = s.night; traits = s.traits; orb = s.orb; place = s.place; HZ = place.hz; return s; }
-// While a coat is being brushed across, everything ahead of the brush still belongs to the old picture.
+// While a coat is being brushed across, everything well ahead of the wash still belongs to the old picture,
+// and what the wash has cleaned but the coat not reached yet belongs to none: nothing is painted there.
 function sceneAt(x, y) {
   let s = cur;
-  if (coat && x * coat.ax + y * coat.ay + coat.lag > coat.front) s = old;
+  if (coat) { const k = x * coat.ax + y * coat.ay; if (k > coat.wash + coat.ahead) s = old; else if (k > coat.front) s = null; }
   return s ? use(s) : null;
 }
 
@@ -710,9 +712,13 @@ function light(x, y, r) { PP.dab(x, y, r, pick(pal.lights, PP.R()), { a: 1, den:
 
 
 // ---------- the coat: broad strokes swept across the whole picture ----------
+// First a wash: a few very broad strokes over everything, sky and land, that clean the old picture away.
+// The coat follows close behind it and brushes in the new one.  The wash is the colour of the new sky,
+// either all the way down or, below the horizon, a muted ground for the land to be painted on.
 const DIRS = [[-1, .3], [1, .3], [-1, -.3], [.3, 1], [1, -.3]];
+const WASH_ASKED = ['sky', 'ground'].includes(qs.get('wash')) ? qs.get('wash') : null;
 function startCoat(dur) {
-  const r = rng(17 + coatN), [ax, ay] = DIRS[coatN++ % DIRS.length];
+  const r = rng(17 + coatN), [ax, ay] = DIRS[coatN++ % DIRS.length], dl = Math.hypot(ax, ay);
   const cw = 62 * U, ch = 38 * U, cells = [];
   let lo = 1e9, hi = -1e9;
   for (let y = -ch / 2; y < H + ch; y += ch) for (let x = -cw; x < W + cw; x += cw) {
@@ -723,10 +729,42 @@ function startCoat(dur) {
   const J = (hi - lo) * .2;
   for (const c of cells) c.k += r() * J;
   cells.sort((a, b) => a.k - b.k);
-  // The old picture keeps being worked on until the last ragged stroke of the coat has passed, but not if
-  // it shows another place: that one's strokes would stay behind on the fresh paint.
-  coat = { cells, i: 0, t0: time, dur, ax, ay, lo, hi: hi + J, J, lag: old && cur && old.place !== cur.place ? 0 : J, front: lo };
+  // the wash: long, nearly level swaths in overlapping rows
+  const ww = 130 * U, wl = 170 * U, wx = 210 * U, wy = 78 * U, wash = [];
+  let wlo = 1e9, whi = -1e9;
+  for (let y = -wy * .3, row = 0; y < H + wy; y += wy, row++) for (let x = -wl * .4 - (row % 2) * wx / 2; x < W + wl; x += wx) {
+    const c = { x: x + (r() - .5) * 40 * U, y: y + (r() - .5) * 18 * U, ang: (r() - .5) * .22 - .06 };
+    c.k = c.x * ax + c.y * ay + r() * 24 * U;
+    if (c.k < wlo) wlo = c.k; if (c.k > whi) whi = c.k;
+    wash.push(c);
+  }
+  wash.sort((a, b) => a.k - b.k);
+  // How far a swath reaches along the sweep from where it is put down, and how far a stroke of the coat does:
+  // the coat keeps that far behind the wash, the old picture that far ahead of it.
+  const reach = (wl * Math.abs(ax) + ww / 2 * Math.abs(ay)) * 1.08 + 24 * U, stroke = 130 * U * dl;
+  const lead = reach + stroke;
+  coat = {
+    cells, i: 0, washCells: wash, wi: 0, t0: time, dur, ax, ay, lo, hi: hi + J, lead, ahead: reach + stroke,
+    s0: Math.min(wlo, lo + lead), s1: Math.max(whi, hi + J + lead), wash: -1e9, front: -1e9,
+    ground: (WASH_ASKED || (r() < .5 ? 'sky' : 'ground')) === 'ground',
+  };
+  coat.wash = coat.s0; coat.front = coat.s0 - lead;
   boostUntil = time + dur + (REDUCED ? 6 : 2.5);
+}
+function washCol(y, ground) {                                  // the colour the wash has at y, in the new picture's palette
+  if (y < HZ) return skyCol(y);
+  const t = clamp((y - HZ) / Math.max(1, H - HZ));
+  if (!ground) return mix(pal.skyLow, pal.skyMid, t * .35);
+  const g = mix(mix(pal.cityFar, pal.haze, .5), pal.skyLow, .25);
+  return mix(mix(pal.skyLow, g, smooth(0, .12, t)), mix(pal.haze, pal.ink, .3), t * .7);
+}
+function washStroke(c, ground) {                               // twice over, the second time between the bristles of the first
+  const R = PP.R, col = washCol(c.y, ground);
+  for (let n = 0; n < 2; n++) {
+    const l = (150 + R() * 40) * U, w = (118 + R() * 24) * U, ang = c.ang + (R() - .5) * .06, ca = Math.cos(ang) * l, sa = Math.sin(ang) * l;
+    const o = n * 1.5 * U + (R() - .5) * 6 * U, ox = -Math.sin(ang) * o, oy = Math.cos(ang) * o;
+    PP.brush(c.x - ca + ox, c.y - sa + oy, c.x + ca + ox, c.y + sa + oy, w, col, { a: 1, jit: 6, dry: 0, full: 1, sp: 3 * U, bow: .04 });
+  }
 }
 function skyCoat(x, y) {
   const R = PP.R, ang = -.36 + (R() - .5) * .2, l = (150 + R() * 90) / 2 * U;
@@ -740,16 +778,19 @@ function clipSky(pad, a, b) {                                  // keep to the sk
 function runCoat() {
   if (!coat) return;
   const p = coat.dur > 0 ? (time - coat.t0) / coat.dur : 1;
-  coat.front = coat.lo + (coat.hi - coat.lo) * p;
+  coat.wash = coat.s0 + (coat.s1 - coat.s0) * Math.min(1, p);
+  coat.front = coat.wash - coat.lead;
+  const wc = coat.washCells;
+  use(cur);
+  for (; coat.wi < wc.length && wc[coat.wi].k <= coat.wash; coat.wi++) washStroke(wc[coat.wi], coat.ground);
   let j = coat.i; const cells = coat.cells;
   while (j < cells.length && cells[j].k <= coat.front) j++;
-  use(cur);
   clipSky(0, cur.place);
   for (let i = coat.i; i < j; i++) if (cells[i].y < HZ + 30 * U) skyCoat(cells[i].x, Math.min(cells[i].y, HZ - 1));
   pctx.restore();
   cur.place.coat(cells, coat.i, j, cur);
   coat.i = j;
-  if (p >= 1 && j >= cells.length) { coat = null; old = null; }
+  if (p >= 1 && j >= cells.length && coat.wi >= wc.length) { coat = null; old = null; }
 }
 
 // ---------- the painting, one frame's worth ----------
