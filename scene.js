@@ -801,21 +801,49 @@ function drawSkyLife(P, t) {
   P.dab(hx, hy, 2.4 * U, pal.star, { a: fade, den: 2.5, core: fade, s: 1.2 * U });
 }
 
+// Lightning is far off, behind whatever stands on the land: a bolt shows only where its point is open sky
+// (above the place's top and clear of anything in front, a tree), in the picture showing there now.
+function inSky(x, y) { const s = sceneAt(x, y); return !!s && y < s.place.top(x) && !(s.place.front && s.place.front(s, x, y)); }
+function skyRuns(pts) {                                        // the pieces of a line that are open sky
+  const runs = [], step = 2 * U; let run = null, lx = 0, ly = 0, lv = false;
+  for (let i = 0; i < pts.length - 1; i++) {
+    const [x1, y1] = pts[i], [x2, y2] = pts[i + 1], n = Math.max(1, Math.ceil(Math.hypot(x2 - x1, y2 - y1) / step));
+    for (let k = i ? 1 : 0; k <= n; k++) {
+      const x = x1 + (x2 - x1) * k / n, y = y1 + (y2 - y1) * k / n, v = inSky(x, y);
+      if (v && !run) runs.push(run = [[x, y]]);
+      else if (v && k === n) run.push([x, y]);                 // keep the bolt's own corners
+      else if (!v && run) { if (lv && run[run.length - 1][0] !== lx) run.push([lx, ly]); run = null; }
+      lx = x; ly = y; lv = v;
+    }
+  }
+  return runs.filter(r => r.length > 1);
+}
 function drawStorm(P, t) {                                     // lightning: the sky flickers, a bolt stands for a moment
   if (!cur.traits.lightning) return;
   use(cur);
   const cyc = 8.5, n = Math.floor(t / cyc), u = t - n * cyc; if (u > .5) return;
   const A = rng(n * 131 + 17), flick = u < .07 ? 1 : u < .13 ? .25 : u < .26 ? .9 : Math.max(0, 1 - (u - .26) / .24), c = P.c;
   if (!REDUCED) { c.fillStyle = css([255, 251, 232], +(flick * .2).toFixed(3)); c.fillRect(0, 0, W, H); }   // the whole sky lights up
-  let x = (.12 + A() * .76) * W, y = HZ * (.15 + A() * .25);
-  const steps = 7 + (A() * 3 | 0), dy = (HZ - 6 * U - y) / steps, bolt = [[x, y]];
+  let x = 0, y = 0, best = -1e9;
+  for (let k = 0; k < 6; k++) {                                // rather where the sky is open a good way down
+    const cx = (.12 + A() * .76) * W, top = cur.place.top(cx), cy = Math.min(HZ * (.15 + A() * .25), top * .4);
+    if (top - cy > best) { best = top - cy; x = cx; y = cy; }
+    if (best > (HZ - cy) * .45) break;
+  }
+  const steps = 7 + (A() * 3 | 0), dy = (HZ - 6 * U - y) / steps, bolt = [[x, y]], forks = [];
   for (let i = 0; i < steps; i++) {
     const nx = x + (A() - .5) * 46 * U, fork = A() < .3, fx = (A() - .5) * 90 * U, fy = dy * (1 + A());
-    if (fork) P.line([[x, y], [x + fx * .5 + (A() - .5) * 14 * U, y + fy * .5], [x + fx, y + fy]], pal.star, 1.3 * U, { a: flick * .7, pass: 1, wob: .6 * U, sharp: 1, step: 999 });
+    if (fork) forks.push([[x, y], [x + fx * .5 + (A() - .5) * 14 * U, y + fy * .5], [x + fx, y + fy]]);
     x = nx; y += dy; bolt.push([x, y]);
   }
-  P.line(bolt, pal.star, 5 * U, { a: flick * .25, pass: 1, wob: U, sharp: 1, step: 999 });      // its glare
-  P.line(bolt, pal.star, 2.2 * U, { a: flick, pass: 2, wob: .7 * U, sharp: 1, step: 999 });
+  const other = old && old.place !== cur.place ? old.place : null, parts = forks.map(skyRuns), main = skyRuns(bolt);
+  use(cur);
+  c.save();                                                    // and none of it beyond the outline of the sky
+  for (const p of [cur.place, other]) if (p) { c.beginPath(); p.sky(c, 4 * U); c.clip(); }
+  for (const f of parts) for (const r of f) P.line(r, pal.star, 1.3 * U, { a: flick * .7, pass: 1, wob: .6 * U, sharp: 1, step: 999 });
+  for (const r of main) P.line(r, pal.star, 5 * U, { a: flick * .25, pass: 1, wob: U, sharp: 1, step: 999 });      // its glare
+  for (const r of main) P.line(r, pal.star, 2.2 * U, { a: flick, pass: 2, wob: .7 * U, sharp: 1, step: 999 });
+  c.restore();
 }
 
 // whatever is in the air: rain, snow, petals, seeds and fireflies, leaves
