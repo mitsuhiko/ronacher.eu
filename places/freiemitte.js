@@ -161,7 +161,16 @@ function ramp(list, t) {                                       // a colour on a 
 let cw = 1, ch = 1;                                            // how big a cell of the town map is in the picture
 const HERO = xf => (xf > .246 && xf < .413) || (xf > .654 && xf < .787);       // the two towers stand close by
 function farOff(xf, pf) { return pf > .5 ? 0 : HERO(xf) ? .04 : pf < .392 && !(xf > .93 && xf < .985) ? .5 : pf < .42 ? .2 : .1; }
-const hazed = (col, xf, pf) => { const f = farOff(xf, pf), h = f * .7 + traits.fog * (.15 + f) + traits.rain * f * .3; return h > 0 ? mix(col, pal.cityFar, clamp(h, 0, .85)) : col; };
+const hazed = (col, xf, pf) => { const f = farOff(xf, pf), h = f * .7 + traits.rain * f * .3; return h > 0 ? mix(col, pal.cityFar, clamp(h, 0, .85)) : col; };
+// Fog is not a thing that stands somewhere: it is between us and everything, and the more of it the farther off a
+// thing is.  Whoever paints says how far off the thing is (0 at our feet, 1 where the town ends), and the brush
+// mixes the fog in.  The park runs away from us up to the houses; how far off those stand farOff() says: the two
+// towers in front of the rest.
+const offAt = (xf, pf) => pf > .5 ? .36 * clamp((1 - pf) / .5) : .38 + farOff(xf, pf) * .9;
+const TOWER_OFF = .34;                                          // the water tower stands at the near end of the houses
+const fogCol = () => night ? mix(pal.skyLow, pal.fog, .35) : pal.fog;   // by night it is no lighter than the sky
+const hazeOf = (d, k) => traits.fog ? [fogCol(), clamp(d * 1.4 - .1, 0, .85) * traits.fog * (k || 1)] : null;
+const veil = d => { PP.haze = hazeOf(d); };
 function wallCol(k, l, r) {
   const t = (l + r) / 8;
   if (k === WARM) return l < 4 ? ramp(pal.pinks, (l + r) / 4) : ramp(pal.reds, (l - 4 + r) / 4);
@@ -175,7 +184,7 @@ function wallStroke(x, y, k) {
   let col = wallCol(k, l0, .3 + R() * .4);
   // a window is dark by day; at night there is a light in some
   const wi = i / 3 | 0, wj = j / 3 | 0;
-  if (night && l0 <= 2 && k !== TEAL && pf < .535 && hash1(wi * 7919 + wj * 131) < (HERO(xf) ? .17 : .13)) col = mix(pal.lights[(hash1(wi * 13 + wj * 7) * pal.lights.length) | 0], pal.dark, farOff(xf, pf) * .5);
+  if (night && l0 <= 2 && k !== TEAL && pf < .535 && hash1(wi * 7919 + wj * 131) < (HERO(xf) ? .17 : .13)) { PP.haze = hazeOf(offAt(xf, pf), .45); col = mix(pal.lights[(hash1(wi * 13 + wj * 7) * pal.lights.length) | 0], pal.dark, farOff(xf, pf) * .5); }
   else { col = hazed(col, xf, pf); const sd = shadow(x, y); if (sd) col = mix(col, pal.dark, sd * .16); }
   PP.brush(x - reach[0], yc, x + reach[1], yc, w, col, { a: .96, jit: 3, dry: 0, bow: 0, sp: Math.min(1.1 * U, w) });
 }
@@ -231,6 +240,7 @@ function groundStroke(x, y, k) {                               // paths, boards,
   PP.brush(x - d[0] * reach[0], y - d[1] * reach[0], x + d[0] * reach[1], y + d[1] * reach[1], (1.3 + R() * 1.7) * sz, col, { a: .88, jit: 6, dry: .1, sp: Math.min(1.1 * U, 1.3 * sz + .3), bow: .03 });
 }
 function paintAt(x, y, k) {
+  veil(offAt(zx, zy));
   if (k === FOL || k === BLOSSOM) leafStroke(x, y, k);
   else if (k === GRASS) grassStroke(x, y);
   else if (k === HARD || k === EARTH || (k === TEAL && zy > .6)) groundStroke(x, y, k);
@@ -264,6 +274,7 @@ function towerStroke() {
   if (!at(x, y) || zone(x, y) !== TOWER) return;
   const xf = zx, pf = zy, part = zp, u = wu, v = wv, o = { a: .94, jit: 5, dry: .04, bow: 0, sp: Math.min(1.1 * U, CH) };
   const lit = part === LEFTWALL || part === LEFTROOF;           // the evening sun is on its left
+  veil(TOWER_OFF);
   const tone = c => hazed(lit ? mix(c, pal.brickSun, .3) : mix(c, pal.brickShade, .3), xf, pf);
   if (part === VANE) { PP.brush(x, py(WP[1] - .011), x, py(WP[1]), Math.max(.8 * U, .0009 * PW), pal.ink, o); if (R() < .3) PP.brush(x - 2 * U, py(WP[1] - .008), x + 2.4 * U, py(WP[1] - .0085), .9 * U, pal.ink, o); return; }
   if (part === CHIMNEY) {
@@ -296,11 +307,13 @@ function towerStroke() {
     : f === STONE ? (bare && v < .5 && R() < .5 ? pal.snowy : mix(pal.ledge, pal.stone, R() * .3)) : f === FRAME ? mix(pal.frame, pal.brick[0], .3)
     : f === GLASS ? (night && hash1((u * 4 | 0) + (left ? 9 : 0) + (v * 3 | 0) * 5) < .4 ? pal.lights[1] : mix(mix(pal.dark, pal.glass, .55), pal.skyMid, .15 + R() * .25)) : f === PIPE ? pal.ink : pal.brickShade;
   const sd = shadow(x, y); if (sd) col = mix(col, pal.brickShade, sd * .25);
+  if (f === GLASS && night) PP.haze = hazeOf(TOWER_OFF, .45);
   PP.brush(px(a[0]), py(a[1]), px(b[0]), py(b[1]), high / rows * .95, f === GLASS && night ? col : tone(col), o);
 }
 function crateStroke() {                                       // the container: blue, ribbed, a tag sprayed across it
   const R = PP.R, x = px(CRATE[0]) + R() * (CRATE[1] - CRATE[0]) * PW, y = py(CRATE[2]) + R() * (CRATE[3] - CRATE[2]) * PH;
   if (!at(x, y) || zone(x, y) !== BOX) return;
+  veil(offAt(zx, zy));
   const xf = zx, pf = zy, top = pf < CRATE[2] + .004, rib = Math.floor((xf - CRATE[0]) / .0016), o = { a: .92, jit: 4, dry: 0, bow: 0, sp: U };
   let col = top ? (bare ? pal.snowy : pal.crateTop) : mix(pal.crate, pal.dark, (rib & 1 ? .2 : 0) + (xf < CRATE[0] + .004 ? .35 : 0));
   if (!top && xf > CRATE[0] + .006 && pf > CRATE[2] + .01 && pf < CRATE[3] - .008 && vnoise(xf * 900, pf * 700) > .5) col = pick(pal.graffiti, vnoise(xf * 300 + 7, pf * 300));
@@ -314,6 +327,7 @@ function cageStroke() {
   if (x < 0 || y >= H || !at(x, y)) return;
   const z = zone(x, y);
   if (z !== NET && z !== BARS) return;
+  veil(offAt(zx, zy));
   const xf = zx, pf = zy, sz = near(pf) * U, l0 = lev, t = (l0 + R()) / 8, k = what(xf, pf), glow = night ? .14 : 0, same = q => q === z;
   if (z === NET) {                                             // the net sags between its ropes; the court shows through it
     if (R() < .3) {                                            // its mesh
@@ -347,18 +361,14 @@ const FLOOD = [.985, .43];
 function lampDab() {                                           // the lamps along the paths, the floodlight over the cage
   const R = PP.R, f = R() < .25, l = f ? FLOOD : pick(LAMPS, R()), x = px(l[0]), y = py(l[1]);
   if (x < 0 || x >= W || !at(x, y) || !night) return;
+  PP.haze = null;                                              // a light is seen through any fog
   PP.dab(x, y + (f ? 6 : 3) * U, (f ? 16 : 6) * U * near(l[1]) * 1.4, pal.lights[0], { a: .1, den: .4, s: 3 * U, jit: 3 });
   light(x, y, (f ? 2.2 : 1.1) * U);
-}
-function fogStroke() {                                         // fog lies over the park in drifting banks
-  const R = PP.R, x = R() * W, depth = R(), y = py(.5 + depth * .24);
-  if (!at(x, y) || !traits.fog || zone(x, y) >= TOWER) return;
-  if (fbm((x + time * 9 * U) * .003 / U, y * .012 / U + time * .008) + (1 - depth) * .2 < .5) return;
-  PP.dab(x, y, (8 + R() * 16) * U, pal.fog, { a: .45, den: .22, s: 4 * U, sx: 2.6, sy: .7, core: .1, jit: 4 });
 }
 function glintDab() {                                          // snow glittering in the sun
   const R = PP.R, x = R() * W, y = parkTop + R() * (H - parkTop);
   if (!at(x, y) || !traits.glint || zone(x, y) !== GRASS || lev < 4) return;
+  PP.haze = null;
   PP.dab(x, y, (.6 + R() * .8) * U, pal.sun, { a: 1, den: 3, core: 1, s: U, jit: 2 });
 }
 
@@ -370,6 +380,7 @@ function coatStroke(x0, y0) {                                  // a fresh coat: 
     if (x < -20 * U || x > W + 20 * U || y > H + 12 * U) continue;
     const k = zone(clamp(x, 0, W - 1), Math.min(y, H - 1)), xf = zx, pf = zy, l = (14 + R() * 8) * U, o = { a: .93, jit: 7, dry: 0, full: 1, sp: 2.2 * U, bow: .03 };
     if (k === SKY) continue;
+    veil(k === TOWER ? TOWER_OFF : offAt(xf, pf));
     if (k === TOWER) { PP.brush(x, y - 10 * U, x, y + 10 * U, 14 * U, zp >= LEFTROOF ? pal.slate : mix(pal.brick[0], zp === LEFTWALL ? pal.brickSun : pal.brickShade, .25), o); continue; }
     if (k === BOX) { PP.brush(x - 4 * U, y, x + 4 * U, y, 6 * U, pal.crate, o); continue; }
     if (k === NET || k === BARS) { PP.brush(x - l, y, x + l, y, 22 * U, k === NET ? pal.teals[2] : mix(pal.earths[2], pal.steel[0], .5), o); continue; }
@@ -398,6 +409,7 @@ function drawWalkers(P, t) {
     const s = .5579 * (Math.exp(1.027 * u) - 1);               // far off a step is a small one: they get faster as they get nearer
     const pf = WALK0 + (WALK1 - WALK0) * clamp(s), h = .03 * PH * near(pf), x = px(walkX(pf) + lane * .006) + Math.sin(t * 2.7 + k * 2) * h * .02, y0 = py(pf);
     if (x < -h || x > W + h || y0 < 0 || y0 > H + h || !at(clamp(x, 0, W - 1), Math.min(y0, H - 1))) continue;
+    P.haze = hazeOf(offAt(walkX(pf), pf));
     const al = smooth(0, .07, s), y = y0 - Math.abs(Math.sin(t * 5.4 + k * 2)) * h * .035;   // they come out of the house at the far end; at the near one they walk out of the picture
     const o = { a: .96 * al, sp: Math.max(.6 * U, h * .06), dry: 0, jit: 3, bow: 0 };
     P.R = rng(7100 + k);                                       // each keeps its own shape, whoever else is about
@@ -406,11 +418,12 @@ function drawWalkers(P, t) {
     for (let n = 0; n < 2; n++) P.brush(x, y - h * .84, x, y - h * .36, h * .25, pal.coats[k % pal.coats.length], o);   // twice over: a coat is not see-through
     P.dab(x, y - h * .96, h * .1, pal.skin, { a: al, den: 2, core: .9 * al, s: Math.max(.5 * U, h * .05), jit: 3 });
   }
+  P.haze = null;
 }
 
 // ---------- the painting, one frame's worth ----------
 let tops = null, landTop = 0, townArea = 0;
-const RATE = { town: 19000, park: 13000, tower: 17000, lamp: 6, crate: 14000, cage: 10000, glint: 90, fog: 1500 };
+const RATE = { town: 19000, park: 13000, tower: 17000, lamp: 6, crate: 14000, cage: 10000, glint: 90 };
 const place = {
   colors: {
     walls: ['#353e4a', '#6b7584', '#abb3be', '#d5d6d4', '#efede6', '#fcfaf3'], creams: ['#2d323a', '#6b6558', '#a89f8a', '#d5c9ae', '#ebe0c6', '#f8f0da'],
@@ -478,7 +491,7 @@ const place = {
     spend('fm-crate', RATE.crate * (CRATE[1] - CRATE[0]) * PW * (CRATE[3] - CRATE[2]) * PH / ua * pace, crateStroke);
     if ((s && s.night) || (o && o.night)) spend('fm-lamp', RATE.lamp * pace, lampDab);
     if (s && s.traits.glint) spend('fm-glint', RATE.glint * W * (H - parkTop) / ua * pace, glintDab);
-    if ((s && s.traits.fog) || (o && o.traits.fog)) spend('fm-fog', RATE.fog * W * .25 * PH / ua * pace, fogStroke);
+    PP.haze = null;
     PP.c.restore();
   },
   coat(cells, i, j, s) {                                       // the land's share of a fresh coat: everything that is not sky
@@ -486,6 +499,7 @@ const place = {
     use(s);
     c.save(); c.beginPath(); c.rect(0, 0, W, H); place.sky(c, 8 * U); c.clip('evenodd');
     for (let k = i; k < j; k++) if (cells[k].y > landTop - 30 * U) coatStroke(cells[k].x, cells[k].y);
+    PP.haze = null;
     c.restore();
   },
   sprites: [{ draw: drawWalkers, t0: 3, seed: 121 }],

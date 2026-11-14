@@ -32,6 +32,15 @@ function treeTop(xf) {                                         // where the tree
 }
 // where the town ends and the vineyards begin: level on the left, the garden suburbs reach further down on the right
 const ridgeY = x => { const xf = x / W; return HZ + BAND * (1 + smooth(.5, .85, xf) * .4 + smooth(.8, 1.05, xf) * .14 + .03 * Math.sin(xf * 9 + 1) + .015 * Math.sin(xf * 23)); };
+// How far off a thing is: 0 the trees in front of us, 1 the hills beyond the town.  In fog everything pales by
+// that: whoever paints says how far off the thing is, and the brush mixes the fog in.  The plain is far off as a
+// whole (f: 0 at the horizon, 1 at its foot), the vineyards come up from there to our feet.
+const plainOff = f => .7 - .32 * clamp(f);
+const hillOff = (x, y) => { const ry = ridgeY(x); return .38 - .3 * clamp((y - ry) / (H - ry)); };
+const fogCol = () => night ? mix(pal.skyLow, pal.fog, .35) : pal.fog;   // by night it is no lighter than the sky
+const hazeOf = (d, k) => traits.fog ? [fogCol(), clamp(d * 1.4 - .1, 0, .85) * traits.fog * (k || 1)] : null;
+const veil = d => { PP.haze = hazeOf(d); };
+const glow = d => { PP.haze = hazeOf(d, .45); };                // a light carries through the fog
 const HT = [null, { b: .13, a: .05, f: 4.2, p: 2.1 }, { b: .3, a: .07, f: 3.1, p: 4 }, { b: .52, a: .07, f: 2.3, p: .7 }];
 function hillTop(i, x) {
   if (!i) return ridgeY(x);
@@ -123,12 +132,17 @@ function folLum(x, y) {                                        // light falls in
   return clamp(.42 + rel * 3.4 - folB * .25 + (smooth(.1, .55, x / W) - .5) * .3 + (y / H - .8) * .25);
 }
 
+// Fog is not a thing that stands somewhere: it is between us and everything, and the more of it the farther off
+// a thing is.  That is veil()'s work.  Over the plain it lies thickest, in banks that drift.
 function fogStroke() {
-  const R = PP.R, x = R() * W, depth = R(), y = HZ - 12 * U + depth * BAND * 2.3;
+  const R = PP.R, x = R() * W, ry = ridgeY(x), y = HZ + R() * (ry - HZ);
   if (!at(x, y) || !traits.fog) return;
-  if (fol(x, y) > 0 || inTree(x, y)) return;
-  if (fbm((x + time * 9 * U) * .003 / U, y * .012 / U + time * .008) + (1 - depth) * .22 < .5) return;
-  PP.dab(x, y, (8 + R() * 16) * U, pal.fog, { a: .5, den: .22, s: 4 * U, sx: 2.6, sy: .7, core: .1, jit: 4 });
+  if (fol(x, y) > -.1 || inTree(x, y)) return;
+  const e = Math.abs((y - HZ) / (ry - HZ) - .45) / .55;        // thinning out towards the hills on either side
+  if (fbm((x + time * 9 * U) * .003 / U, y * .012 / U + time * .008) < .4 + e * .2) return;
+  const l = (14 + R() * 30) * U;
+  PP.haze = null;
+  PP.brush(x - l, y, x + l, y + (R() - .5) * 2 * U, (3 + R() * 6) * U, fogCol(), { a: .22, jit: 3, dry: .25, sp: 2 * U, bow: .03 });
 }
 
 // a bush, a tree seen from far away
@@ -212,6 +226,7 @@ function treeStroke() {                                        // a stretch of b
   const span = Math.min(1, (10 + R() * 22) * U / s.len), t0 = R() * (1 - span), tm = t0 + span / 2, t1 = t0 + span;
   const scene = at(limbX(s, tm), Math.min(H - 1, limbY(s, tm))); if (!scene) return;
   const bark = mix(pal.trunk, pal.towerLight, s.depth < 4 ? .34 : .2), q = R();
+  PP.haze = null;                                              // it stands right in front of us
   const o = { a: .93, jit: 8, dry: .06, sp: Math.min(1.3 * U, s.w), bow: .03 };
   for (const [a, b] of [[t0, tm], [tm, t1]]) {
     const ax = limbX(s, a), ay = limbY(s, a), bx = limbX(s, b), by = limbY(s, b);
@@ -291,13 +306,15 @@ function townReach(x, y, l) {                                  // how far a leve
 function landmark(s, x, y) {
   const R = PP.R, w = s.x1 - s.x0, h = s.y1 - s.y0, cx = s.x0 + w / 2, cy = s.y0 + h / 2, lw = s.lw;
   if (fol(x, y) > -.05) return;
+  const fb = (s.y1 - HZ) / (ridgeY(cx) - HZ), off = fb <= 1 ? plainOff(fb) : hillOff(cx, s.y1);   // as far off as its foot
+  if (s.col === 'beacon') glow(off); else veil(off);
   let col = s.col === 'farmRoof' ? (traits.bare ? pal.fieldLight : mix(pal.roof, pal.dark, .55)) : s.col === 'sand' ? pal.city[7] : pal[s.col];
   if (s.col !== 'beacon' && s.col !== 'gold') col = mix(col, pal.haze, .1 + clamp(1 - s.f) * .32);     // blue with distance
   const sz = (.5 + clamp(s.f) * 1.1) * U, o = { a: .9, jit: 9, dry: .05, bow: 0, sp: 1.1 * U };
   if (s.kind === 'dab') PP.dab(cx, cy, w / 2, col, { a: 1, den: 2.5, core: .9, s: U, jit: 4 });
   else if (s.kind === 'ring') {                                // a bit of the rim, now and then a spoke or a leg
     const a = R() * TAU, r = w / 2, px = cx + Math.cos(a) * r, qy = cy + Math.sin(a) * r, l = r * .5, k = R();
-    if (night) { PP.dab(px, qy, .6 * U, pal.lights[1], { a: 1, den: 3, core: 1, s: U }); return; }
+    if (night) { glow(off); PP.dab(px, qy, .6 * U, pal.lights[1], { a: 1, den: 3, core: 1, s: U }); return; }
     if (k > .8) PP.dab(cx, cy, r * .6, mix(pal.folDark, pal.haze, .3), { a: .8, den: 1.5, core: .7, s: U });   // the trees of the Prater show through
     o.sp = lw;
     PP.brush(px - Math.sin(a) * l, qy + Math.cos(a) * l, px + Math.sin(a) * l, qy - Math.cos(a) * l, lw, col, o);
@@ -320,7 +337,7 @@ function landmark(s, x, y) {
     const px = clamp(x, s.x0 + l, s.x1 - l), qy = clamp(y, s.y0 + t / 2, s.y1 - t / 2);
     PP.brush(px - l, qy, px + l, qy, t, mix(col, R() < .5 ? pal.towerLight : pal.dark, R() * .16), o);
   }
-  if (night && s.lit && R() < s.lit * .3) light(s.x0 + R() * w, s.y0 + R() * h, (.5 + R() * .4) * U);
+  if (night && s.lit && R() < s.lit * .3) { glow(off); light(s.x0 + R() * w, s.y0 + R() * h, (.5 + R() * .4) * U); }
 }
 function townStroke() {
   const R = PP.R; let k = R() * townWeight, s = town[0];
@@ -334,6 +351,7 @@ function glintDab() {                                          // snow glitterin
   if (!at(x, y) || !traits.glint || y < ridgeY(x) || fol(x, y) > -.05 || inTree(x, y)) return;
   hillAt(x, y);
   if (hs.hedge || hs.lum < .45) return;
+  PP.haze = null;
   PP.dab(x, y, (.7 + R() * .9) * U, pal.sun, { a: 1, den: 3, core: 1, s: U, jit: 2 });
 }
 
@@ -341,6 +359,7 @@ function farStroke() {
   const R = PP.R, x = R() * W, fh = farH(x), y = HZ - R() * fh;
   if (!at(x, y)) return;
   const l = (14 + R() * 40) * U;
+  veil(1);
   PP.brush(x - l, y, x + l, y + (R() - .5) * U, (1.2 + R() * 1.6) * U, mix(pal.haze, pal.skyLow, R() * .3 + (HZ - y) / fh * .2), { a: .8, jit: 5, dry: .15, sp: 1.2 * U, bow: .02 });
 }
 
@@ -348,14 +367,15 @@ function cityStroke() {
   const R = PP.R, x = R() * W, ry = ridgeY(x), y = HZ + R() * (ry - HZ);
   if (!at(x, y)) return;
   if (fol(x, y) > -.1 || inTree(x, y)) return;
-  const f = clamp((y - HZ) / (ry - HZ)), sz = (.5 + f * 1.1) * U;
+  const f = clamp((y - HZ) / (ry - HZ)), sz = (.5 + f * 1.1) * U, off = plainOff(f);
   const mark = townAt(x, y, 0, 0);
   if (mark) { landmark(mark, x, y); return; }
+  veil(off);
   if (riverAt(x, f)) {
     const sh = vnoise(x * .03 / U + time * .5, y * .4 / U), l = townReach(x, y, (8 + R() * 26) * sz);
     PP.brush(x - l, y, x + l, y + (R() - .5) * 1.5 * U, (1.5 + R() * 2.5) * sz, mix(pal.water, sh > .5 ? pal.waterLight : pal.waterDark, Math.abs(sh - .5) * 1.5),
       { a: .85, jit: 6, dry: .15, sp: 1.1 * U, bow: 0 });
-    if (night && R() < .1) PP.brush(x, y - 2 * sz, x, y + 3 * sz, 1.4 * U, pick(pal.lights, R()), { a: .5, sp: U, bow: 0 });
+    if (night && R() < .1) { glow(off); PP.brush(x, y - 2 * sz, x, y + 3 * sz, 1.4 * U, pick(pal.lights, R()), { a: .5, sp: U, bow: 0 }); }
     return;
   }
   // beyond the river lie woods and gardens with pale houses in them, all of it blue with distance
@@ -364,7 +384,7 @@ function cityStroke() {
     const l = townReach(x, y, (6 + R() * 18) * U), woods = beyond || R() < smooth(.62, .5, xf), k = R();   // dark woods behind the river and the Prater
     PP.brush(x - l, y, x + l, y, (1.4 + R() * 2) * U, woods ? mix(mix(pal.cityGreen, pal.haze, .7), pal.cityFar, R() * .35) : mix(pal.cityFar, k < .4 ? pal.city[0] : k < .7 ? pal.haze : pal.cityGreen, R() * (k < .7 ? .6 : .3)), { a: .8, jit: 8, dry: .1, sp: 1.1 * U, bow: 0 });
     if (R() < (woods ? .15 : .6) && !townAt(x, y, 2 * U, 2 * U)) PP.dab(x, y, (1 + R()) * U, R() < .7 ? pal.city[0] : pal.cityFar, { a: .6, den: 1.2 });
-    if (night && R() < (woods ? .15 : .5)) light(x + (R() - .5) * l, y, (.5 + R() * .5) * U);
+    if (night && R() < (woods ? .15 : .5)) { glow(off); light(x + (R() - .5) * l, y, (.5 + R() * .5) * U); }
     return;
   }
   let g = fbm(x * .008 / U + 3, y * .03 / U + 7) + smooth(.62, 1, f) * .28 + (beyond ? .2 : 0) + (R() - .5) * .22;   // garden suburbs in front
@@ -373,9 +393,10 @@ function cityStroke() {
   if (green) {                                                 // parks, gardens, the woods along the river
     const r = (1.6 + R() * 2.4) * sz;
     if (townAt(x, y, r * .7, r * .7)) return;
-    PP.haze = [pal.haze, haze * (beyond ? 1.3 : 1)];
+    const fg = PP.haze, a = haze * (beyond ? 1.3 : 1), b = fg ? fg[1] : 0, w = a + b - a * b;   // blue with distance, and the fog over that
+    PP.haze = [fg ? mix(pal.haze, fg[0], b / (w || 1)) : pal.haze, w];
     bush(x, y, r);
-    PP.haze = null;
+    PP.haze = fg;
   } else {
     let c = pick(pal.city, R());
     if ((c === pal.city[2] || c === pal.city[3]) && (beyond || R() > f * .75)) c = pal.city[R() < .6 ? 0 : 5];   // red roofs only show close by
@@ -383,7 +404,7 @@ function cityStroke() {
     PP.brush(x - l, y, x + l, y, (1.6 + R() * 2.4) * sz, mix(c, pal.cityFar, haze * .9), { a: .9, jit: 9, dry: .05, sp: 1.1 * U, bow: 0 });
     if (!beyond && R() < f * f * .3) PP.brush(x - l, y - 1.6 * sz, x + l * .6, y - 1.6 * sz, 1.3 * sz, pal.city[2 + (R() * 2 | 0)], { a: .8, sp: U, bow: 0 });   // a roof
   }
-  if (night && R() < (green ? .12 : beyond ? .3 : .55)) light(x + (R() - .5) * 6 * sz, y + (R() - .5) * 3 * sz, (.55 + R() * .7) * U);
+  if (night && R() < (green ? .12 : beyond ? .3 : .55)) { glow(off); light(x + (R() - .5) * 6 * sz, y + (R() - .5) * 3 * sz, (.55 + R() * .7) * U); }
 }
 
 function hillStroke() {
@@ -393,6 +414,7 @@ function hillStroke() {
   if (y < ry || fol(x, y) > -.05 || townAt(x, y, 10 * U, 4 * U) || inTree(x, y)) return;
   hillAt(x, y);
   const li = hs.li, id = hs.id, sz = (.55 + li * .3) * U;
+  veil(hillOff(x, y));
   if (hs.hedge) { bush(x, y, (2.5 + R() * 3.5) * sz); return; }
   if (hs.path) {                                               // a track along the slope
     const a = Math.atan(hs.slope), l = (5 + R() * 9) * sz;
@@ -423,6 +445,7 @@ function foliageDab() {
   const R = PP.R, x = R() * W, y = treeLine + R() * (H - treeLine);
   if (!at(x, y)) return;
   const d = fol(x, y); if (d < -.08 || inTree(x, y)) return;
+  PP.haze = null;                                              // the trees stand right in front of us
   const lum = folLum(x, y), sz = (.8 + (y / H - .5) * 1.5) * U, k = R();
   if (d < .12) {                                               // the ragged rim: single leaves
     PP.dab(x, y, (3 + R() * 6) * sz, traits.bare ? pal.folDark : lum > .5 ? pal.folMid : pal.folDark, { a: .85, den: .3, s: 3 * U });
@@ -446,17 +469,20 @@ function foliageDab() {
 
 function coatStroke(x, y) {                                    // a broad stroke of a fresh coat
   const R = PP.R;
+  PP.haze = null;
   if (fol(x, y) > 0) {
     const lum = folLum(x, y), a = R() * Math.PI, l = 26 * U;
     PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (40 + R() * 20) * U,
       traits.bare ? mix(pal.folMid, pal.folLight, clamp(lum * 1.1) * .6) : mix(pal.folDeep, lum > .5 ? pal.folMid : pal.folDark, clamp(lum * 1.3)), { a: .93, jit: 9, dry: 0, full: 1, sp: 2.4 * U });
   } else if (y < ridgeY(x)) {
     const f = (y - HZ) / (ridgeY(x) - HZ), l = (40 + R() * 40) * U;
+    veil(plainOff(f));
     const col = riverAt(x, f) ? pal.water : mix(mix(pal.city[1], pal.cityGreen, .4), pal.cityFar, clamp(1 - f) * .6);
     PP.brush(x - l, y, x + l, y, (36 + R() * 12) * U, col, { a: .92, jit: 8, dry: 0, full: 1, sp: 2.2 * U, bow: .03 });
   } else {
     hillAt(x, y);
     const a = Math.atan(hs.slope), l = (40 + R() * 40) * U;
+    veil(hillOff(x, y));
     PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (42 + R() * 14) * U, hs.hedge ? pal.folDark : fieldColor(), { a: .92, jit: 8, dry: 0, full: 1, sp: 2.2 * U, bow: .04 });
   }
 }
@@ -494,13 +520,15 @@ const place = {
     spend('fol', RATE.fol * W * (H - treeLine) * .7 / ua * pace, foliageDab);
     spend('tree', RATE.tree * limbLength / (14 * U) * pace, treeStroke);
     if (s && s.traits.glint) spend('glint', RATE.glint * W * HILL / ua * pace, glintDab);
-    if ((s && s.traits.fog) || (o && o.traits.fog)) spend('fog', RATE.fog * W * BAND * 2.3 / ua * pace, fogStroke);
+    if ((s && s.traits.fog) || (o && o.traits.fog)) spend('fog', RATE.fog * W * BAND * 1.2 / ua * pace, fogStroke);
+    PP.haze = null;
     PP.c.restore();
   },
   coat(cells, i, j, s) {                                       // the land's share of a fresh coat
     use(s);
     clipBand(HZ, H);
     for (let k = i; k < j; k++) if (cells[k].y >= HZ - 30 * U) coatStroke(cells[k].x, Math.max(cells[k].y, HZ));
+    PP.haze = null;
     PP.c.restore();
   },
   sprites: [{ draw: drawSmoke, t0: 4, seed: 103 }],
