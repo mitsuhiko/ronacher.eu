@@ -12,8 +12,8 @@ const { PP, TAU, clamp, smooth, ease, mix, pick, rng, hash1, vnoise, fbm, wind, 
 // ---------- what the brush is looking at ----------
 let W = 0, H = 0, U = 1, time = 0;          // the view (CSS pixels, the stroke unit) and the clock
 let HZ = 0, PW = 1, PH = 1, CH = 3;         // horizon; the photo's width and height in pixels; how high a course of bricks is
-let pal = null, traits = null, night = false, season = '';
-const use = s => { pal = s.pal; traits = s.traits; night = s.night; season = s.season; return s; };
+let pal = null, traits = null, night = false, season = '', snow = false;   // snow: whether any lies.  Winter alone is bare, not white
+const use = s => { pal = s.pal; traits = s.traits; night = s.night; season = s.season; snow = traits.snow > 0; return s; };
 const at = (x, y) => { const s = kit.at(x, y, place); return s && use(s); };   // the picture at a point, if it is one of this place
 
 // ---------- geometry ----------
@@ -41,6 +41,17 @@ const TOPS = [[.07, .56], [.09, .535], [.12, .505], [.2, .492], [.3, .495], [.36
 const FEET = [[.07, .56], [.1, .566], [.2, .6], [.3, .612], [.36, .6], [.42, .615], [.455, .575], [.5, .55], [.6, .52], [.75, .49], [1, .46], [2, .45]];
 const bushTop = xf => along2(TOPS, xf), footAt = xf => along2(FEET, xf) + (vnoise(xf * 60, 2.2) - .5) * .02;
 const solidTop = xf => Math.min(farTop(xf), bushTop(xf) + .014);
+// How far off a thing is: 0 at our feet, 1 where the path ends.  In fog everything pales by that: whoever paints
+// says how far off the thing is, and the brush mixes the fog in.  On level ground it is a matter of how close to
+// the horizon a point lies.  What is up on the embankment runs to where the path ends as well, but higher above
+// the ground and farther to the side, so the same step in the picture is a shorter way.  Its slope is both: level
+// ground down at the path (u = 1), the embankment up under the ivy.
+const offAt = (xf, pf) => Math.hypot((xf - VPX) * .75, pf - VPY);
+const flatOff = pf => .03 / (.03 + Math.max(0, pf - VPY));
+const farOff = (xf, pf) => .1 / (.1 + offAt(xf, pf));
+const slopeOff = (xf, pf, u) => { const r = offAt(xf, pf), c = .1 + (clamp(.03 * r / (pf - VPY), .03, .1) - .1) * u; return c / (c + r); };
+const fogCol = () => night ? mix(pal.skyLow, pal.fog, .35) : pal.fog;   // by night it is no lighter than the sky
+const veil = d => { PP.haze = traits.fog ? [fogCol(), clamp(d * 1.4 - .1, 0, .85) * traits.fog] : null; };
 
 // ---------- the tower ----------
 // Whatever is level on it runs towards one of two points on the horizon: on its left side to the
@@ -50,6 +61,7 @@ const VLX = .075, VRX = 3.8, XL = .328, XC = .454, XR = .893;  // the far end of
 const reachOf = xf => xf < XC ? (xf - VLX) / (XC - VLX) : (VRX - xf) / (VRX - XC);
 const levelOf = (xf, pf) => HOR + (pf - HOR) / reachOf(xf);    // which line a point lies on
 const levelY = (c, xf) => HOR + (c - HOR) * reachOf(xf);       // how high that line is at x
+const towerOff = xf => xf < XC ? .3 + clamp((XC - xf) / (XC - XL)) * .16 : .3 + (xf - XC) * .04;   // its left side runs away from us
 // The roof is seen from below: the tip of the eaves on the left, their near corner, the far end of the gutter.
 const EAVE = [.299, .259], PEAK = [.429, .071], GUT = [.915, .15], CHIM = [.658, .679, .078];
 const roofY = xf => xf < PEAK[0] ? EAVE[1] + (PEAK[1] - EAVE[1]) * (xf - EAVE[0]) / (PEAK[0] - EAVE[0]) : PEAK[1] + (GUT[1] - PEAK[1]) * (xf - PEAK[0]) / (GUT[0] - PEAK[0]);
@@ -150,7 +162,7 @@ function treeList() {                                          // and what stand
 }
 // Leaves are a heap of crowns: those of the bushes and the ivy lie over a solid mass, every tree adds a few of its
 // own.  The poplars stand behind the tower, everything else in front of it.
-let crowns = [], leafy = [], leafArea = 0, stripsF = [], stripsB = [], topF = [], topB = [], folTop = 0, folB = 0, folTree = false;
+let crowns = [], leafy = [], leafArea = 0, stripsF = [], stripsB = [], topF = [], topB = [], folTop = 0, folB = 0, folTree = false, folOff = 0;
 const STRIP = 28;                                              // the crowns are sorted into upright strips, so that a point need not ask all of them
 // Thin things other strokes have to keep clear of: a coarse mask says where the limbs are (1 behind the tower, 2 in front of it).
 let limbs = [], limbWeight = 0, limbLength = 0, mask = null, mCols = 0, mRows = 0, mCell = 4, frontTop = 0;
@@ -168,20 +180,22 @@ function buildTrees() {
     }
     xf += rad / PW * (.7 + r() * .5);
   }
+  let off = 0;                                                 // how far off the tree is that is being grown
   const add = (x1, y1, x2, y2, bend, w, depth, tip, front) => {
     const len = Math.hypot(x2 - x1, y2 - y1), a = Math.atan2(y2 - y1, x2 - x1);
-    limbs.push({ x1, y1, x2, y2, cx: (x1 + x2) / 2 - Math.sin(a) * len * bend * 2, cy: (y1 + y2) / 2 + Math.cos(a) * len * bend * 2, w, depth, tip, front, k: r(), len });
+    limbs.push({ x1, y1, x2, y2, cx: (x1 + x2) / 2 - Math.sin(a) * len * bend * 2, cy: (y1 + y2) / 2 + Math.cos(a) * len * bend * 2, w, depth, tip, front, k: r(), len, off });
   };
   const grow = (x, y, a, len, w, depth, rad, t) => {
     const x2 = x + Math.cos(a) * len, y2 = y + Math.sin(a) * len, last = depth >= 5 || len <= 4 * U;
     add(x, y, x2, y2, (r() - .5) * .3, w, depth, last, t[5]);
-    crowns.push({ x: x2, y: y2, r: rad * (depth < 3 ? .8 + r() * .5 : depth < 4 ? .7 : .5), tree: true, back: !t[5], thin: t[4] });
+    crowns.push({ x: x2, y: y2, r: rad * (depth < 3 ? .8 + r() * .5 : depth < 4 ? .7 : .5), tree: true, back: !t[5], thin: t[4], off });
     if (last) return;
     const k = r() < .75 ? 2 : 3;
     for (let i = 0; i < k; i++) grow(x2, y2, a + (i - (k - 1) / 2) * .62 + (r() - .5) * .45, len * (.58 + r() * .2), Math.max(.7 * U, w * .6), depth + 1, rad, t);
   };
   for (const t of treeList()) {
     r = rng(31 + Math.round(t[0] * 1000));                     // every tree keeps its shape, whatever else is to be seen
+    off = t[5] ? farOff(t[0], t[1]) : clamp(.13 / (t[1] - t[2]));   // those down by the path: the smaller, the farther
     const x = px(t[0]), y = py(t[1]), h = (t[1] - t[2]) * PH, w = Math.max(1.5 * U, h * .024), rad = h * (t[4] > .1 ? .075 : .13);
     add(x, y, x + (r() - .5) * h * .1, y - h * .4, (r() - .5) * .08, w, 0, false, t[5]);
     const trunk = limbs[limbs.length - 1];
@@ -231,7 +245,7 @@ function fol(x, y, back) {                                     // > 0 inside the
   if (list) for (const c of list) {
     const dx = x - c.x - sw; if (dx > c.r || dx < -c.r || (bare && c.tree)) continue;   // a bare tree is its limbs and nothing else
     const dy = y - c.y, q = 1 - Math.hypot(dx, dy * 1.1) / c.r - (c.tree ? c.thin + fall : 0);   // in autumn half the leaves are down
-    if (q > d) { d = q; folB = dy / c.r; tree = c.tree; }
+    if (q > d) { d = q; folB = dy / c.r; tree = c.tree; folOff = c.off; }
   }
   folTree = tree;
   return d * 1.2 + (fbm(x * .03 / U + time * .02, y * .03 / U) - .47) * .6;
@@ -271,17 +285,17 @@ let TX0 = 0, TX1 = 0, TY0 = 0, TY1 = 0;                        // the box it sta
 function tone(col, front, x, y) {                              // its left side lies in the shade
   if (!front) col = mix(col, pal.brickShade, .4);
   const sd = shadow(x, y);
-  if (sd) col = mix(col, pal.brickShade, sd * .28);
-  return traits.fog ? mix(col, pal.haze, traits.fog * .22) : col;
+  return sd ? mix(col, pal.brickShade, sd * .28) : col;
 }
 function towerStroke() {
   const R = PP.R, x = TX0 + R() * (TX1 - TX0), y = TY0 + R() * (TY1 - TY0);
   if (!at(x, y) || zone(x, y) !== TOWER) return;
   const xf = zx, pf = zy, o = { a: .93, jit: 5, dry: .04, bow: 0, sp: 1.1 * U };
+  veil(towerOff(xf));
   if (zp === ROOF) { roofStroke(x, y, xf, pf, o); return; }
   if (zp === CHIMNEY) {                                        // its pots, and the snow on them
     const top = pf < CHIM[2] + .009, yc = Math.round(y / CH) * CH;
-    PP.brush(px(CHIM[0]) + U, yc, px(CHIM[1]) - U, yc, CH * .85, tone(top ? (traits.bare ? pal.folLight : pal.pot) : pal.brick[(hash1(yc * 7 | 0) * 5) | 0], true, x, y), o);
+    PP.brush(px(CHIM[0]) + U, yc, px(CHIM[1]) - U, yc, CH * .85, tone(top ? (snow ? pal.snow : pal.pot) : pal.brick[(hash1(yc * 7 | 0) * 5) | 0], true, x, y), o);
     return;
   }
   const front = zp === FRONT, c = levelOf(xf, pf), m = wallAt(xf, c), k = reachOf(xf), x0 = front ? XC : XL, x1 = front ? XR : XC;
@@ -307,7 +321,7 @@ function towerStroke() {
     PP.brush(px(xm), ya + .4 * U, px(xm), j & 1 ? ya + (yb - ya) * .72 : yb, wd, tone(j & 1 ? pal.brick[5] : dark, front, x, y), o);
   } else if (m === STONE || m === SHADE || m === OPEN || m === SHUTTER) {   // level strokes
     const l = (m === STONE || m === SHADE ? 3 + R() * 7 : 2 + R() * 3) * U / PW, xa = fit(Math.max(x0, xf - l), c), xb = fit(Math.min(x1, xf + l), c);
-    const col = m === STONE ? (traits.bare && R() < .65 ? pal.folLight : mix(pal.ledge, pal.stone, R() * .25))
+    const col = m === STONE ? (snow && R() < .65 ? pal.snow : mix(pal.ledge, pal.stone, R() * .25))
       : m === SHADE ? dark : m === OPEN ? mix(pal.opening, pal.dark, R() * .35) : night ? mix(pal.shutter, pal.lights[1], .6) : mix(pal.shutter, pal.gold, R() * .3);
     PP.brush(px(xa), py(levelY(c, xa)), px(xb), py(levelY(c, xb)), (m === STONE ? 1.8 : 1.5) * U, m === SHUTTER && night ? col : tone(col, front, x, y), o);
   } else if (m === ARCH || m === RIM) {                        // an arch: its bricks stand on end, a moulding runs round it
@@ -339,7 +353,7 @@ function roofStroke(x, y, xf, pf, o) {                         // the underside 
   let xa = x - ca * l, xb = x + ca * l, ya = y - sa * l, yb = y + sa * l;
   if (y - top < 3.4 * U) {                                     // the gutter (or the snow on the roof)
     const e = clamp(fx(xa), EAVE[0], GUT[0]), f = clamp(fx(xb), EAVE[0], GUT[0]);
-    PP.brush(px(e), py(roofY(e)) + 1.3 * U, px(f), py(roofY(f)) + 1.3 * U, 2.2 * U, traits.bare ? pal.folLight : mix(pal.gutter, pal.zinc, R() * .5), o);
+    PP.brush(px(e), py(roofY(e)) + 1.3 * U, px(f), py(roofY(f)) + 1.3 * U, 2.2 * U, snow ? pal.snow : mix(pal.gutter, pal.zinc, R() * .5), o);
     return;
   }
   if (towerPart(fx(xa), fy(ya)) !== ROOF) { xa = x - ca * l * .3; ya = y - sa * l * .3; if (towerPart(fx(xa), fy(ya)) !== ROOF) return; }
@@ -350,8 +364,9 @@ function roofStroke(x, y, xf, pf, o) {                         // the underside 
 function lampDab() {                                           // the lamp on its bracket, left of the corner
   const x = px(.4255), y = py(.405);
   if (!at(x, y)) return;
+  PP.haze = null;                                              // a light is seen through any fog, and all the wider for it
   if (!night) { PP.dab(x, y, 1.2 * U, pal.ink, { a: 1, den: 2.5, core: .9, s: U, jit: 3 }); return; }
-  PP.dab(x - U, y + 5 * U, 7 * U, pal.lights[0], { a: .09, den: .4, s: 2.4 * U, jit: 3 });
+  PP.dab(x - U, y + 5 * U, (7 + traits.fog * 5) * U, pal.lights[0], { a: .09, den: .4, s: 2.4 * U, jit: 3 });
   light(x, y, U);
 }
 
@@ -361,13 +376,17 @@ function farStroke() {                                         // the trees wher
   if (x < 0 || !at(x, y) || zone(x, y) !== FAR) return;
   const f = (foot - y) / (foot - top), n = vnoise(x * .05 / U + 11, y * .09 / U), k = R();
   let col = mix(pal.folMid, n > .5 ? pal.folLight : pal.folDark, Math.abs(n - .5) * 1.5);
-  if (f < .2) col = mix(col, pal.folDeep, .4); else if (f > .5 && k < .35) col = mix(col, pal.folSun, .5); else if (pal.accent && k > .93) col = pick(pal.accent, R());
-  PP.dab(x, y, (1.5 + R() * 2.6) * U, mix(col, pal.haze, .18 + traits.fog * .3), { a: .9, den: .8, core: .6, s: 1.6 * U });
+  if (f < .2) col = mix(col, pal.folDeep, .4);
+  else if (snow && k < .4) col = mix(col, pal.snow, .75);      // it lies on their twigs
+  else if (f > .5 && k < .35) col = mix(col, traits.bare ? pal.folLight : pal.folSun, .5); else if (pal.accent && k > .93) col = pick(pal.accent, R());
+  veil(.9);
+  PP.dab(x, y, (1.5 + R() * 2.6) * U, mix(col, pal.haze, .18), { a: .9, den: .8, core: .6, s: 1.6 * U });
 }
 function pathStroke() {                                        // gravel: every stroke points to where the path ends
   const R = PP.R, x = R() * W, y = HZ - 8 * U + R() * (H - HZ + 8 * U);
   if (!at(x, y) || zone(x, y) !== PATH) return;
   const xf = zx, pf = zy, w = zw, near = clamp((pf - VPY) / .4), sz = (.4 + near) * U, k = R();
+  veil(flatOff(pf));
   let dx = (xf - VPX) * PW, dy = (pf - VPY) * PH; const q = 1 / (Math.hypot(dx, dy) || 1); dx *= q; dy *= q;
   const n = fbm(x * .02 / U + 7, y * .05 / U), sd = shadow(x, y), wr = pathR(pf), wl = pathL(pf);
   let col = mix(pal.gravel, n > .5 ? pal.gravelLight : pal.gravelDark, Math.abs(n - .5) * 1.5);
@@ -387,19 +406,15 @@ function meadowStroke() {                                      // left of the pa
   if (k < .2) col = mix(col, pal.grassLight, .45); else if (k > .85) col = mix(col, pal.grassDark, .4);
   if (sd) col = mix(col, pal.grassDark, sd * .6);
   col = mix(col, pal.haze, (1 - near) * .25);
+  veil(flatOff(zy));
   const a = -Math.PI / 2 + (R() - .5) * .9 + wind(time) * .08, l = (3 + R() * 7) * sz;
   PP.brush(x, y, x + Math.cos(a) * l * 2, y + Math.sin(a) * l * 2, (1.5 + R() * 2.5) * sz, col, { a: .85, jit: 9, dry: .2, sp: 1.2 * U, bow: .15 });
 }
-function shrub(x, y, r) {                                      // a bit of a bush on the slope
-  const R = PP.R;
-  if (traits.bare) {
-    for (let i = 0; i < 2; i++) { const a = -Math.PI / 2 + (R() - .5) * 1.6; PP.line([[x, y + r * .5], [x + Math.cos(a) * r * 1.4, y + r * .5 + Math.sin(a) * r * 1.6]], pal.folDark, Math.max(.8, r * .14), { pass: 1, a: .75, wob: .4 * U }); }
-    if (R() < .5) PP.dab(x, y - r * .4, r * .6, pal.folLight, { a: .85, den: .6, core: .4, s: 1.5 * U, sx: 1.4, sy: .6 });
-    return;
-  }
-  const k = R();
-  PP.dab(x, y, r, k < .5 ? pal.folDark : k < .85 ? pal.folMid : pal.folDeep, { a: .9, den: .7, core: .6, s: 2 * U });
-  if (k < .45) PP.dab(x + r * .3, y - r * .4, r * .55, k < .1 && pal.accent ? pick(pal.accent, R()) : pal.folLight, { a: .85, den: .6, core: .4, s: 1.6 * U });
+function shrub(x, y, r) {                                      // where the ivy has got down the slope
+  const R = PP.R, k = R();
+  PP.dab(x, y, r, k < .5 ? pal.ivyDark : k < .85 ? pal.ivyMid : pal.ivyDeep, { a: .9, den: .7, core: .6, s: 2 * U });
+  if (snow) { if (k < .6) PP.dab(x, y - r * .4, r * .6, pal.snow, { a: .85, den: .6, core: .4, s: 1.5 * U, sx: 1.4, sy: .6 }); }
+  else if (k < .45) PP.dab(x + r * .3, y - r * .4, r * .55, pal.ivyLight, { a: .85, den: .6, core: .4, s: 1.6 * U });
 }
 let slopeTop = 0;
 function slopeStroke() {                                       // the embankment: long grass hanging down it, dry where the sun gets at it
@@ -407,6 +422,7 @@ function slopeStroke() {                                       // the embankment
   if (!at(x, y) || zone(x, y) !== SLOPE) return;
   const xf = zx, pf = zy, foot = footAt(xf), edge = VPY + (xf - VPX) / pathR(pf), u = clamp((pf - foot) / Math.max(.01, edge - foot));   // 0 under the ivy, 1 at the path
   const near = clamp((pf - .5) / .4), sz = (.55 + near * .8) * U, sd = shadow(x, y), k = R();
+  veil(slopeOff(xf, pf, u));
   const n = fbm(x * .012 / U + 2, y * .02 / U + 5), dry = smooth(.4, .62, n + (xf - .55) * .35 - u * .3);
   if (fbm(xf * 13 + 1.3, pf * 16) + smooth(.6, 1, xf) * .14 - Math.abs(u - .5) * .35 > .63) { shrub(x, y, (2.2 + R() * 3) * sz); return; }
   let col = u > .8 ? mix(pal.grass, pal.grassLight, n * .6) : mix(mix(pal.grass, pal.grassDark, n), pal.straw, dry * .85);
@@ -435,31 +451,24 @@ function leaf(x, y) {
   if (!at(x, y)) return;
   const z = zone(x, y), d = zf;
   if (z === TREE || z === PATH || z === MEADOW || z === SLOPE || d < -.08) return;
-  const tree = folTree, xf = zx, ivy = !tree && xf > .345, line = py(bushTop(xf)), deep = tree ? 0 : clamp((y - line) / (.1 * PH)), k = R();
+  const tree = folTree, xf = zx, line = py(bushTop(xf)), deep = tree ? 0 : clamp((y - line) / (.1 * PH)), k = R();
   const sz = (tree ? .5 : .55 + deep * .3) * U, lum = clamp(folLum(x, y) + (tree ? .1 : -deep * .25));
+  veil(tree ? folOff : farOff(xf, zy));
   if (d < .12) {                                               // the ragged rim: single leaves
-    PP.dab(x, y, (2.5 + R() * 5) * sz, ivy ? (lum > .5 ? pal.ivyMid : pal.ivyDark) : traits.bare ? pal.folDark : lum > .5 ? pal.folMid : pal.folDark, { a: .85, den: .3, s: 2.4 * U });
+    PP.dab(x, y, (2.5 + R() * 5) * sz, tree ? (lum > .5 ? pal.folMid : pal.folDark) : lum > .5 ? pal.ivyMid : pal.ivyDark, { a: .85, den: .3, s: 2.4 * U });
     return;
   }
-  const a = R() * Math.PI, l = (4 + R() * 8) * sz, o = { a: .85, sp: 1.3 * U, dry: .2, jit: 10 };
-  if (ivy) {                                                   // green the whole year round, red here and there in autumn, snow on it in winter
-    if (traits.bare && lum > .5 && k < lum * .7) { PP.dab(x, y, (4 + R() * 8) * sz, lum > .7 ? pal.ivySun : pal.ivyLight, { a: .9, den: .6, core: .55, sx: 1.7, sy: .55 }); return; }
-    let col = lum < .3 ? mix(pal.ivyDeep, pal.ivyDark, lum / .3) : lum < .6 ? mix(pal.ivyDark, pal.ivyMid, (lum - .3) / .3) : mix(pal.ivyMid, traits.bare ? pal.ivyMid : pal.ivyLight, (lum - .6) / .4);
-    if (!traits.bare && lum > .62 && k < .3) col = pal.ivySun; else if (season === 'autumn' && lum > .3 && k > .94) col = pick(pal.accent, R() * .26 + (R() < .5 ? 0 : .74));
-    PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (4 + R() * 6) * sz, col, o);
-    return;
+  const a = R() * Math.PI, l = (4 + R() * 8) * sz;
+  let col;
+  if (tree) {                                                  // the trees go with the season
+    col = lum < .3 ? mix(pal.folDeep, pal.folDark, lum / .3) : lum < .6 ? mix(pal.folDark, pal.folMid, (lum - .3) / .3) : mix(pal.folMid, pal.folLight, (lum - .6) / .4);
+    if (lum > .6 && k < .3) col = pal.folSun; else if (pal.accent && lum > .3 && k > (season === 'spring' ? .6 : .92)) col = pick(pal.accent, R());
+  } else {                                                     // the ivy, and the bushes it has grown over: green the whole year round, all of it
+    if (snow && lum > .5 && k < lum * .7) { PP.dab(x, y, (4 + R() * 8) * sz, lum > .7 ? pal.snowSun : pal.snow, { a: .9, den: .6, core: .55, sx: 1.7, sy: .55 }); return; }   // snow lies on it
+    col = lum < .3 ? mix(pal.ivyDeep, pal.ivyDark, lum / .3) : lum < .6 ? mix(pal.ivyDark, pal.ivyMid, (lum - .3) / .3) : mix(pal.ivyMid, pal.ivyLight, (lum - .6) / .4);
+    if (!snow && lum > .62 && k < .3) col = pal.ivySun;
   }
-  if (traits.bare) {                                           // twigs, and the snow lying on them
-    if (lum > .42 && k < .2 + lum * .6) { PP.dab(x, y, (4 + R() * 8) * sz, lum > .6 ? pal.folSun : pal.folLight, { a: .9, den: .6, core: .55, sx: 1.7, sy: .55 }); return; }
-    const b = -Math.PI / 2 + (R() - .5) * 2, t = (8 + R() * 18) * sz;
-    if (k > .6) PP.dab(x, y, (5 + R() * 6) * sz, mix(pal.folMid, pal.folLight, .25 + lum * .5), { a: .8, den: .5, core: .5, s: 2 * U });
-    PP.line([[x, y], [x + Math.cos(b) * t * .5 + (R() - .5) * 4 * U, y + Math.sin(b) * t * .5], [x + Math.cos(b) * t, y + Math.sin(b) * t]],
-      lum < .35 ? pal.folDeep : k < .8 ? pal.folDark : pal.folMid, (1 + R() * 1.2) * sz, { pass: 1, a: .8 });
-    return;
-  }
-  let col = lum < .3 ? mix(pal.folDeep, pal.folDark, lum / .3) : lum < .6 ? mix(pal.folDark, pal.folMid, (lum - .3) / .3) : mix(pal.folMid, pal.folLight, (lum - .6) / .4);
-  if (lum > .6 && k < .3) col = pal.folSun; else if (pal.accent && lum > .3 && k > (tree && season === 'spring' ? .6 : .92)) col = pick(pal.accent, R());
-  PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (4 + R() * 6) * sz, col, o);
+  PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (4 + R() * 6) * sz, col, { a: .85, sp: 1.3 * U, dry: .2, jit: 10 });
 }
 function treeStroke() {                                        // a stretch of bark
   const R = PP.R; let k = R() * limbWeight, s = limbs[0];
@@ -468,31 +477,28 @@ function treeStroke() {                                        // a stretch of b
   const span = Math.min(1, (8 + R() * 16) * U / s.len), t0 = R() * (1 - span), tm = t0 + span / 2, t1 = t0 + span;
   const mx = limbX(s, tm), my = limbY(s, tm);
   if (!at(mx, my) || zone(mx, my) !== TREE) return;            // not where leaves or the tower hide it
+  veil(s.off);
   const bark = mix(pal.trunk, pal.towerLight, s.depth < 2 ? .16 : .06), q = R();
   const o = { a: .93, jit: 8, dry: .06, sp: Math.min(1.2 * U, s.w), bow: .03 };
   for (const [a, b] of [[t0, tm], [tm, t1]]) {
     const ax = limbX(s, a), ay = limbY(s, a), bx = limbX(s, b), by = limbY(s, b);
     PP.brush(ax, ay, bx, by, s.w, bark, o);
-    if (traits.bare) { if (s.w > 1.3 * U && q < .7) PP.brush(ax, ay - s.w * .45, bx, by - s.w * .45, s.w * .45, pal.folLight, { a: .9, jit: 4, dry: .05, sp: Math.min(1.2 * U, s.w * .45), bow: .03 }); }   // snow lies on it
+    if (snow) { if (s.w > 1.3 * U && q < .7) PP.brush(ax, ay - s.w * .45, bx, by - s.w * .45, s.w * .45, pal.snow, { a: .9, jit: 4, dry: .05, sp: Math.min(1.2 * U, s.w * .45), bow: .03 }); }   // snow lies on it
     else if (s.w > 3 * U && q < .5) PP.brush(ax + s.w * .22, ay, bx + s.w * .22, by, s.w * .28, mix(pal.trunk, pal.towerLight, .5), { a: .6, jit: 6, sp: Math.min(1.2 * U, s.w * .28), bow: .03 });      // the sunny side
   }
 }
 
 // ---------- weather ----------
-function fogStroke() {                                         // fog lies where the path ends, under the poplars; the embankment stands clear of it
-  const R = PP.R, x = R() * Math.min(W, px(.5)), depth = R(), y = py(.45 + depth * .17);
-  if (x < 0 || !at(x, y) || !traits.fog) return;
-  const z = zone(x, y);
-  if (z === TREE || z === TOWER || (zx > .36 && z !== PATH)) return;
-  if (fbm((x + time * 9 * U) * .003 / U, y * .012 / U + time * .008) + (1 - depth) * .22 < .5 || R() < (depth - .55) / .45) return;   // thinning out towards us
-  PP.dab(x, y, (8 + R() * 16) * U, pal.fog, { a: .5, den: .22, s: 4 * U, sx: 2.6, sy: .7, core: .1, jit: 4 });
-}
-function glintDab() {                                          // snow glittering in the sun
-  const R = PP.R, x = R() * W, y = HZ + R() * (H - HZ);
-  if (!at(x, y) || !traits.glint) return;
-  const z = zone(x, y);
-  if (z !== PATH && z !== SLOPE && z !== MEADOW) return;
-  PP.dab(x, y, (.7 + R() * .9) * U, pal.sun, { a: 1, den: 3, core: 1, s: U, jit: 2 });
+// Fog is not a thing that stands somewhere: it is between us and everything, and the more of it the farther off
+// a thing is.  That is veil()'s work.  Where the path ends it lies thickest, in banks that drift.
+function fogStroke() {
+  const R = PP.R, x1 = Math.min(W, px(.32)), x = R() * x1, y = py(.475 + R() * .15);
+  if (x1 <= 0 || !at(x, y) || !traits.fog) return;
+  const xf = fx(x), e = Math.hypot((xf - VPX) / .26, (fy(y) - .55) / .075);    // thinning out towards its edges
+  if (e > 1 || fbm((x + time * 9 * U) * .003 / U, y * .012 / U + time * .008) < .36 + e * .22) return;
+  const l = (14 + R() * 30) * U;
+  PP.haze = null;
+  PP.brush(x - l, y, Math.min(x + l, px(.325)), y + (R() - .5) * 2 * U, (4 + R() * 8) * U, fogCol(), { a: .32, jit: 3, dry: .25, sp: 2 * U, bow: .03 });
 }
 
 // ---------- the coat ----------
@@ -500,11 +506,12 @@ function coatStroke(x, y) {                                    // a broad stroke
   const R = PP.R, o = { a: .92, jit: 8, dry: 0, full: 1, sp: 2.2 * U, bow: .03 }, l = (40 + R() * 40) * U;
   const z = zone(x, Math.min(y, H - 1), true);
   if (z === SKY || z === TOWER) return;
+  veil(z === FAR ? .9 : z === LEAVES ? (folTree ? folOff : farOff(zx, zy)) : z === SLOPE ? slopeOff(zx, zy, .5) : flatOff(zy));
   if (z === FAR) PP.brush(x - l * .5, y, x + l * .5, y, .05 * PH, mix(pal.folMid, pal.haze, .2), o);
   else if (z === LEAVES) {
-    const lum = clamp(folLum(x, y)), a = R() * Math.PI, fl = 16 * U, ivy = !folTree && zx > .345;
+    const lum = clamp(folLum(x, y)), a = R() * Math.PI, fl = 16 * U, k = clamp(lum * 1.3);
     PP.brush(x - Math.cos(a) * fl, y - Math.sin(a) * fl, x + Math.cos(a) * fl, y + Math.sin(a) * fl, (26 + R() * 14) * U,
-      ivy ? mix(pal.ivyDeep, lum > .5 ? pal.ivyMid : pal.ivyDark, clamp(lum * 1.3)) : traits.bare ? mix(pal.folMid, pal.folLight, lum * .6) : mix(pal.folDeep, lum > .5 ? pal.folMid : pal.folDark, clamp(lum * 1.3)), o);
+      folTree ? mix(pal.folDeep, lum > .5 ? pal.folMid : pal.folDark, k) : mix(pal.ivyDeep, lum > .5 ? pal.ivyMid : pal.ivyDark, k), o);
   } else {
     let dx = l, dy = 0, col = mix(pal.grass, pal.grassDark, .4);
     if (z === PATH) { dx = (zx - VPX) * PW; dy = (zy - VPY) * PH; const q = l / (Math.hypot(dx, dy) || 1); dx *= q; dy *= q; col = pal.gravel; }
@@ -522,6 +529,7 @@ function towerCoat(x, y, part) {                               // the tower's sh
   const xf = fx(x), pf = fy(y), front = part === 2, x0 = front ? XC : XL, x1 = front ? XR : XC;
   const R = PP.R, o = { a: .95, jit: 6, dry: 0, full: 1, sp: 2.2 * U, bow: 0 }, l = (50 + R() * 40) * U / PW;
   if (pf < PEAK[1] - .06 || pf > FOOT + .06 || xf < EAVE[0] - .12 || xf > GUT[0] + .12) return;
+  veil(towerOff(xf));
   if (part) {
     if (xf < x0 - l || xf > x1 + l) return;
     const c = clamp(levelOf(clamp(xf, x0, x1), pf), WALL, FOOT);
@@ -574,7 +582,7 @@ function buildSky() {                                          // where the sky 
   }
 }
 const OPEN_SKY = [[-.02, .43], [.04, .4], [.1, .34], [.18, .29], [.3, .26]];   // how far down the sky is open on the left
-const RATE = { far: 9000, tower: 15000, path: 8000, meadow: 12000, slope: 7000, fol: 8000, tree: 1.2, lamp: 4, glint: 90, fog: 1500 };
+const RATE = { far: 9000, tower: 15000, path: 8000, meadow: 12000, slope: 7000, fol: 8000, tree: 1.2, lamp: 4, fog: 1500 };
 const place = {
   colors: {
     brick: ['#a98a5c', '#8b6a47', '#6e5440', '#4c3d34', '#3a302c', '#b79c6c', '#7d5a41', '#96774f'], brickRed: ['#b85c3c', '#c66f45', '#99452f', '#70392c', '#a8523a'],
@@ -582,13 +590,20 @@ const place = {
     board: '#aaa598', shutter: '#d8b13a', opening: '#353a43', pot: '#8f4a38',
     gravel: '#aba69c', gravelLight: '#c6c1b5', gravelDark: '#807c74', grass: '#6f9b3d', grassLight: '#a8c653', grassDark: '#3f6a31', straw: '#c8ba88',
     ivyDeep: '#14261a', ivyDark: '#1f3d24', ivyMid: '#37652e', ivyLight: '#6f9a3a', ivySun: '#b9cc58',
+    snow: '#edf0f1', snowSun: '#ffffff',
   },
   seasons: {
     spring: { ivyMid: '#42782f', ivyLight: '#86b443', grass: '#86b84a', grassLight: '#c3df62', grassDark: '#4f8438', straw: '#b9c27a' },
     autumn: { ivyMid: '#3f6a2c', ivyLight: '#8a9a38', ivySun: '#d8c44c', grass: '#8d9a46', grassLight: '#c4bb5e', grassDark: '#59692f', straw: '#d6bf7c' },
-    winter: { grass: '#eef1f1', grassLight: '#ffffff', grassDark: '#aab7c5', gravel: '#e4e8eb', gravelLight: '#ffffff', gravelDark: '#b9c3ce', straw: '#d9d6c8', ivyDeep: '#1a2420', ivyDark: '#26392b', ivyMid: '#3a5236', ivyLight: '#eef1f2', ivySun: '#ffffff' },
+    // Winter by itself is bare and dull, not white: the grass has gone the colour of straw, the twigs are twigs.
+    winter: { grass: '#878c5a', grassLight: '#aeab76', grassDark: '#5a6243', straw: '#bcab80', folLight: '#847a70',
+      ivyDeep: '#1a2420', ivyDark: '#26392b', ivyMid: '#3a5236', ivyLight: '#5c7a41', ivySun: '#8d9c58' },
   },
-  ground: /^(gravel|straw|grass)/,
+  weathers: {                                                  // white is what snow makes it, and frost a little
+    snow: { grass: '#eef1f1', grassLight: '#ffffff', grassDark: '#aab7c5', gravel: '#e4e8eb', gravelLight: '#ffffff', gravelDark: '#b9c3ce', straw: '#d9d6c8' },
+    frost: { grass: '#9fa893', grassLight: '#dfe6e1', grassDark: '#6a7763', straw: '#c9c5ae', gravel: '#b5b4ae', gravelLight: '#d9d9d3', folLight: '#bfc4c4', ivyLight: '#93aa97', ivySun: '#d6e0da' },
+  },
+  ground: /^(gravel|straw|grass|snow)/,
   hz: 0,
   layout(v) {
     W = v.W; H = v.H; U = v.U;
@@ -632,8 +647,8 @@ const place = {
     if (!s || !s.traits.bare || o) spend('nb-crown', RATE.fol * leafArea * 1.6 / ua * pace, crownDab);
     spend('nb-tree', RATE.tree * limbLength / (14 * U) * pace, treeStroke);
     spend('nb-lamp', RATE.lamp * pace, lampDab);
-    if (s && s.traits.glint) spend('nb-glint', RATE.glint * W * (H - HZ) / ua * pace, glintDab);
-    if ((s && s.traits.fog) || (o && o.traits.fog)) spend('nb-fog', RATE.fog * Math.max(0, Math.min(W, px(.5))) * .17 * PH / ua * pace, fogStroke);
+    if ((s && s.traits.fog) || (o && o.traits.fog)) spend('nb-fog', RATE.fog * Math.max(0, Math.min(W, px(.32))) * .15 * PH / ua * pace, fogStroke);
+    PP.haze = null;
     PP.c.restore();
   },
   coat(cells, i, j, s) {                                       // the land's share of a fresh coat: everything that is not sky
@@ -646,6 +661,7 @@ const place = {
       c.restore();
     }
     for (let k = i; k < j; k++) if (cells[k].y > landTop - 20 * U) for (let n = -1; n < 2; n++) coatStroke(cells[k].x + n * 22 * U, cells[k].y + n * 14 * U);   // thrice over: nothing of the old picture is to show through, however narrow a strip
+    PP.haze = null;
     c.restore();
   },
   sprites: [{ draw: drawRoofLife, t0: 4, seed: 121 }],

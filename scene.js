@@ -229,12 +229,12 @@ function nightOf(day, n, ground) {
   out.hull = dim(hex(SHARED.hull), .45); out.wall = dim(hex(SHARED.wall), .6);
   return out;
 }
-// A season in fair weather, by day, with the colours a place adds to it (or wants different).
+// A season in fair weather, by day, with the colours a place adds to it (or wants different, in a weather of its own).
 const bases = {};
-function baseOf(place, season) {
-  const key = place.id + '/' + season;
+function baseOf(place, season, name) {
+  const own = place.weathers && place.weathers[name], key = place.id + '/' + season + (own ? '/' + name : '');
   if (bases[key]) return bases[key];
-  const d = bases[key] = {}, src = Object.assign({}, SHARED, DAY[season], place.colors, place.seasons && place.seasons[season], GLOW);
+  const d = bases[key] = {}, src = Object.assign({}, SHARED, DAY[season], place.colors, place.seasons && place.seasons[season], own, GLOW);
   for (const k in src) { const v = src[k]; d[k] = v === null ? null : Array.isArray(v) ? v.map(hex) : hex(v); }
   return d;
 }
@@ -312,7 +312,7 @@ function weatherNight(n, name) {
 }
 const palettes = {};
 function paletteOf(place, season, name, isNight) {
-  const key = place.id + '/' + season + '/' + name + (isNight ? '/night' : ''), base = baseOf(place, season);
+  const key = place.id + '/' + season + '/' + name + (isNight ? '/night' : ''), base = baseOf(place, season, name);
   if (palettes[key]) return palettes[key];
   const d = weatherDay(base, name, place.colors);
   if (season === 'winter' && name === 'sunny') {               // winter sun: low, pale gold, long blue shadows
@@ -321,7 +321,7 @@ function paletteOf(place, season, name, isNight) {
     d.city = d.city.map(c => mix(c, hex('#ffe9c8'), .18)); d.cityFar = mix(d.cityFar, hex('#f3dfc6'), .4);
   }
   if (!isNight) return palettes[key] = d;
-  const n = nightOf(d, NIGHT[season], place.ground);
+  const n = nightOf(d, NIGHT[season], place.weathers && !place.weathers[name] ? null : place.ground);
   for (const k in GLOW) n[k] = base[k];
   return palettes[key] = weatherNight(n, name);
 }
@@ -521,7 +521,9 @@ const wind = t => Math.sin(t * 1.7) * .5 + Math.sin(t * 2.9 + 1) * .3 + Math.sin
 // { id, name, make } on window.viennaPlaces: that is all it takes to have one more to choose from.
 // make(kit) is called once with the paint box below and returns what the place brings along:
 //   colors, seasons   colours of its own, added to those of the season; seasons: { winter: { ... } }
-//                     for what differs by season.  ground: a test for those that snow lies on.
+//                     for what differs by season, weathers: { snow: { ... } } for what differs by weather.
+//                     ground: a test for those that snow lies on: all winter, or only in the weathers
+//                     it has colours for.
 //   layout(view)      the picture has got another size: { W, H, U }.  Sets hz, its horizon.  Called
 //                     before the place is shown, not for those nobody looks at.
 //   tick(time)        the clock, every frame
