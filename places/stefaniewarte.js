@@ -532,16 +532,32 @@ function towerStroke() {
       const lean = big ? 0 : (cc - .5) * .13;
       xa = (j - h) * bl + lean + .0008; xb = xa + bl - .0016; ya = yb = cc;
     }
-    const ok = (ex, ey) => { const p = towerPart(ex, ey); return p === m; };
+    const ok = (ex, ey) => towerPart(ex, ey) === m, X1 = px(xa, ya), Y1 = py(ya), X2 = px(xb, yb), Y2 = py(yb);
     if (!ok(xa, ya)) { xa = (xa + xf) / 2; ya = (ya + pf) / 2; if (!ok(xa, ya)) { xa = xf; ya = round ? pf : cc; } }
     if (!ok(xb, yb)) { xb = (xb + xf) / 2; yb = (yb + pf) / 2; if (!ok(xb, yb)) { xb = xf; yb = round ? pf : cc; } }
-    if (px(xb, yb) - px(xa, ya) < 1.2 * U) return;
     let col = pal.stones[(hash1(i * 131 + j * 17) * pal.stones.length) | 0];
     col = mix(col, pal.stoneStain, smooth(.52, .8, fbm(xf * 46 + 3, c * 60)) * .38);   // weather
     if (m === STEP) col = mix(col, pal.stoneStain, .25);
+    // A stone is one stroke where there is room for all of it.  Where something stands in front of a part of it (the
+    // table, the weeds at the foot of the wall, the plaque, a dish) it is put in bit by bit, round that.
+    const x1 = px(xa, ya), y1 = py(ya), x2 = px(xb, yb), y2 = py(yb), e = ch * .38;
+    let whole = x2 - x1 >= 1.2 * U;
+    for (let k = 0, n = Math.ceil((x2 - x1) / (3 * U)); k <= n && whole; k++) { const ex = xa + (xb - xa) * k / n, ey = ya + (yb - ya) * k / n; whole = ok(ex, ey - e) && ok(ex, ey) && ok(ex, ey + e); }
+    col = tone(col);
+    if (!whole) {
+      const d = Math.hypot(X2 - X1, Y2 - Y1), ca = (X2 - X1) / d, sa = (Y2 - Y1) / d, mine = isTower(m);
+      const t = (x - X1) * ca + (y - Y1) * sa, w = room(x, y, -sa, ca, wd * .5, mine);
+      run(x, y, ca, sa, (3 + R() * 5) * U, mine, 1.5 * U);
+      const r0 = Math.min(reach[0], t), r1 = Math.min(reach[1], d - t);   // and no further than the stone goes
+      if (r0 + r1 < U) return;
+      o.sp = Math.min(1.1 * U, w);
+      PP.brush(x - ca * r0, y - sa * r0, x + ca * r1, y + sa * r1, w, col, o);
+      return;
+    }
     o.sp = Math.min(1.1 * U, wd);
-    PP.brush(px(xa, ya), py(ya), px(xb, yb), py(yb), wd, tone(col), o);
-    if (R() < .3) PP.brush(px(xa, ya), py(ya) + wd * .55, px(xb, yb), py(yb) + wd * .55, .7 * U, tone(pal.joint), { a: .65, jit: 4, dry: .1, bow: 0, sp: .7 * U });   // the shade in the joint under it
+    PP.brush(x1, y1, x2, y2, wd, col, o);
+    if (R() < .3) PP.brush(x1, y1 + wd * .55, x2, y2 + wd * .55, .7 * U, tone(pal.joint), { a: .65, jit: 4, dry: .1, bow: 0, sp: .7 * U });   // the shade in the joint under it
+    thinsOver(x1 - 2 * U, Math.min(y1, y2) - wd * .5 - 2 * U, x2 + 2 * U, Math.max(y1, y2) + wd * .7 + 2 * U);
     return;
   }
   if (m === ASHLAR || m === RELIEF) {                          // smooth stone: long level strokes, a joint now and then
@@ -619,8 +635,22 @@ function thinStroke() {                                        // a stretch of a
   const mx = s.x1 + dx * (t0 + t1) / 2, my = s.y1 + dy * (t0 + t1) / 2;
   if (mx < 0 || my < 0 || mx >= W || my >= H || !at(mx, my) || zone(mx, my) !== THIN) return;
   veil(.3);
+  thinPiece(s, t0, t1);
+}
+function thinPiece(s, t0, t1) {
+  const R = PP.R, dx = s.x2 - s.x1, dy = s.y2 - s.y1;
   const col = s.kind === IRON ? mix(pal.iron, pal.dark, R() * .3) : s.kind === STEEL ? mix(pal.steel, pal.zinc, R() * .5) : snow && R() < .3 ? pal.snow : mix(pal.aerial, pal.zinc, R() * .5);
   PP.brush(s.x1 + dx * t0, s.y1 + dy * t0, s.x1 + dx * t1, s.y1 + dy * t1, s.w, col, { a: .93, jit: 4, dry: 0, bow: 0, sp: Math.min(U, s.w) });
+}
+function thinsOver(x0, y0, x1, y1) {                           // a stone has been painted behind railings: they go back in front of it at once
+  for (const s of thins) {
+    if (Math.max(s.x1, s.x2) < x0 || Math.min(s.x1, s.x2) > x1 || Math.max(s.y1, s.y2) < y0 || Math.min(s.y1, s.y2) > y1) continue;
+    const dx = s.x2 - s.x1, dy = s.y2 - s.y1;
+    let t0 = 0, t1 = 1;                                        // the stretch of it that lies in the box
+    if (dx) { const a = (x0 - s.x1) / dx, b = (x1 - s.x1) / dx; t0 = Math.max(t0, Math.min(a, b)); t1 = Math.min(t1, Math.max(a, b)); }
+    if (dy) { const a = (y0 - s.y1) / dy, b = (y1 - s.y1) / dy; t0 = Math.max(t0, Math.min(a, b)); t1 = Math.min(t1, Math.max(a, b)); }
+    if (t1 > t0) thinPiece(s, t0, t1);
+  }
 }
 function lampDab() {                                           // by night: the red light on the mast, the lamp in the porch
   const R = PP.R, porch = R() < .5, x = porch ? px(.628, .6) : px(mastX(.214), .214), y = py(porch ? .6 : .214);
