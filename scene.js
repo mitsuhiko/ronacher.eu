@@ -778,7 +778,14 @@ function paint(dt) {
 // picture, so they have a canvas of their own that is wiped every frame.  They are painted
 // with the same brushes and chalk as everything below them.
 
-function drawSkyLife(P, t) {
+function drawSkyLife(P, t) {                                   // far off, all of it: nothing of it in front of what stands on the land
+  const c = P.c, other = old && old.place !== cur.place ? old.place : null;
+  c.save();
+  for (const p of [cur.place, other]) if (p) { c.beginPath(); p.sky(c, 0); c.clip(); }
+  skyLife(P, t);
+  c.restore();
+}
+function skyLife(P, t) {
   use(cur);
   if (!night) {                                                // a flock of birds, now and then, if the weather is fit for flying
     const u = (t % 38) / 30; if (u > 1 || traits.rain || traits.snow || traits.fog) return;
