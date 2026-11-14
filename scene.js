@@ -528,6 +528,7 @@ const wind = t => Math.sin(t * 1.7) * .5 + Math.sin(t * 2.9 + 1) * .3 + Math.sin
 //   top(x)            where its sky ends at x: no stroke of the sky starts below
 //   sky(path, pad)    the outline of its sky, kept pad off the horizon: no stroke of the sky leaves it
 //   front(picture, x, y)   optional: whether something of it stands in front of the sky here (a tree)
+//   orb(orb)          optional: move the sun or the moon ({ x, y, r }) to where its sky is open
 //   paint(pace, picture, under)    a frame's worth of strokes for the picture and the one under it
 //                     (null if that shows another place).  kit.at(x, y, place) is the picture a point
 //                     belongs to right now, if it is one of this place.
@@ -552,6 +553,7 @@ function layoutScene(s) {
     : s.traits.glint ? { x: W * .87, y: HZ * .56, r: 19 * U, col: p.sun, glow: p.sunGlow, k: .75, spread: 130 }   // the winter sun never gets far up
     : w.orb === 'high' ? { x: W * .84, y: HZ * .24, r: 17 * U, col: p.sun, glow: p.sunGlow, k: .55, spread: 70 }
     : w.orb === 'low' ? { x: W * .89, y: HZ * .74, r: 22 * U, col: p.sunLow, glow: p.sunLowGlow, k: .8, spread: 150 } : null;
+  if (s.orb && s.place.orb) s.place.orb(s.orb);
   const short = Math.min(W, HZ * 2.4);
   for (const c of s.clouds) {
     const l = c.l, R = rng(l[5]), w = c.w = l[2] * short, h = c.h = l[3] * short, puffs = c.puffs = [];
@@ -682,7 +684,7 @@ function orbDab() {                                            // the moon, or t
   const R = PP.R, scene = coat && old && R() < .5 ? old : cur, o = scene.orb;
   if (!o) return;
   const a = R() * TAU, d = Math.sqrt(R()) * o.r * .86, x = o.x + Math.cos(a) * d, y = o.y + Math.sin(a) * d;
-  if (sceneAt(x, y) !== scene || dens(x, y) > .25) return;
+  if (sceneAt(x, y) !== scene || dens(x, y) > .25 || (place.front && place.front(scene, x, y))) return;
   const mare = o.moon && fbm(x * .05 / U + 5, y * .05 / U) > .56;
   PP.dab(x, y, (2 + R() * 2.5) * U, mare ? pal.moonShade : o.col, { a: .92, den: .9, core: .7, s: 1.6 * U, jit: 4 });
 }
