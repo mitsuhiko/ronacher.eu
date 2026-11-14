@@ -116,11 +116,12 @@ function topAt(h, xf) {                                        // where a house 
 }
 
 // ---------- the trees along the far quay ----------
-// Each a heap of leaves: [x, y, how big, how far off].  They all stand in front of a house.
+// Each a heap of leaves on a trunk: [x, y, how big], and where it stands: on the pavement along the wall, this side
+// of the road.  They all stand in front of a house.
 let trees = [], treeTop = 1;
 function buildTrees() {
   trees = [];
-  const add = (x, y, r) => trees.push({ x, y, r, far: clamp(.4 - (x - CVX) / 8, 0, .4), k: trees.length });
+  const add = (x, y, r) => { const foot = HOR + (wallTop(x) - HOR) * .86; trees.push({ x, y: Math.min(y, foot - r * 1.5), r, foot, hw: r * .11, far: clamp(.4 - (x - CVX) / 8, 0, .4), k: trees.length }); };   // no crown so low that its trunk does not show
   for (const t of [[-.035, .57, .03], [.018, .573, .03], [.06, .58, .022], [.455, .586, .012], [.472, .58, .018], [.497, .585, .014], [.566, .589, .009]]) add(...t);
   let r = rng(23);
   for (let x = -.11; x > CVX + .6;) { const s = (x - CVX) / 2.82, rad = (.017 + r() * .012) * s; if (r() < .8) add(x, HOR - rad * (.7 + r() * .5), rad); x -= rad * (1.6 + r() * 1.6); }
@@ -129,6 +130,22 @@ function buildTrees() {
   treeTop = 1; for (const t of trees) treeTop = Math.min(treeTop, t.y - t.r * 1.3);
 }
 let zt = null;                                                 // the tree a point was found in
+const trunkTop = t => t.y - (traits && traits.bare ? t.r * .55 : 0);   // bare, it shows right up into the crown
+function trunkAt(xf, pf) {
+  if (pf < treeTop || pf > .68) return false;
+  for (const t of trees) if (pf < t.foot && pf > trunkTop(t) && Math.abs(xf - t.x) < t.hw * (.75 + .5 * (pf - t.y) / (t.foot - t.y))) { zt = t; return true; }
+  return false;
+}
+const span = [0, 0];
+function clearOfTrunks(x, pf, a, b) {                          // a level stroke through x from a to b: as much of it as crosses no trunk
+  if (pf > treeTop && pf < .68) for (const t of trees) {
+    if (pf >= t.foot || pf <= t.y - t.r * .55) continue;
+    const xa = px(t.x - t.hw * 1.4) - .5 * U, xb = px(t.x + t.hw * 1.4) + .5 * U;
+    if (xb <= a || xa >= b) continue;
+    if (x <= xa) b = xa; else if (x >= xb) a = xb;
+  }
+  span[0] = a; span[1] = b;
+}
 function treeAt(xf, pf) {
   if (pf < treeTop || pf > .66) return false;
   let best = 0;
@@ -144,7 +161,7 @@ function treeAt(xf, pf) {
 // ---------- whose a point is ----------
 // Every point of the picture belongs to one thing, the nearest that covers it, and only that
 // thing's strokes may start there.
-const SKY = 0, HOUSE = 1, SLABZ = 2, CYL = 3, SLOTZ = 4, HALL = 5, LEG = 6, TREE = 7, GROUND = 8, UWALL = 9, CRATEZ = 10, PROM = 11, QUAY = 12, WATER = 13, DECK = 14, RAILING = 15, GIRDER = 16;
+const SKY = 0, HOUSE = 1, SLABZ = 2, CYL = 3, SLOTZ = 4, HALL = 5, LEG = 6, TREE = 7, TRUNK = 8, GROUND = 9, UWALL = 10, CRATEZ = 11, PROM = 12, QUAY = 13, WATER = 14, DECK = 15, RAILING = 16, GIRDER = 17;
 const CRATE = [.526, .605, .652, .681];                        // the blue container on the promenade: left, right, top, foot
 let zx = 0, zy = 0, zv = 0, zh = null;                         // what zone() learnt on the way: x and y on the photo, the line through the point, the house
 function zone(xf, pf, raw) {                                   // raw: as if the bridge were not there (the water mirrors what is behind it)
@@ -164,7 +181,10 @@ function zone(xf, pf, raw) {                                   // raw: as if the
   if (xf >= CRATE[0] && xf < CRATE[1] && pf >= CRATE[2] && pf < CRATE[3]) return CRATEZ;
   if (c >= FOOT) return PROM;
   if (pf >= wallTop(xf)) return UWALL;
+  const stem = trunkAt(xf, pf), tree = stem ? zt : null;
+  if (stem && traits && traits.bare) return TRUNK;
   if (treeAt(xf, pf)) return TREE;
+  if (stem) { zt = tree; return TRUNK; }
   if (pf >= STREET) return GROUND;
   if (xf > .56 && xf < CR1) {
     if (xf >= CL1 && pf >= cylTop(xf)) return CYL;
@@ -246,7 +266,8 @@ function houseStroke(x, y) {
   else if (b === 0 && u < .09) win(0, .09, mix(col, pal.dark, .16));                // where the next house begins
   const sd = shadow(x, y); if (sd && !lit) col = mix(col, pal.dark, sd * .15);
   const A = Math.max(xa, px(h.x0 + la * bw) + .3 * U, x - l), B = Math.min(xb, px(h.x0 + lb * bw) - .3 * U, x + l);
-  PP.brush(Math.min(A, B), y, Math.max(A, B, A + .6), y, w, lit ? col : far(col), o);
+  clearOfTrunks(x, pf, Math.min(A, B), Math.max(A, B, A + .6));
+  PP.brush(span[0], y, span[1], y, w, lit ? col : far(col), o);
 }
 
 // ---------- the tower ----------
@@ -346,22 +367,52 @@ function treeStroke(x, y) {
   const a = R() * Math.PI, l = (3 + R() * 5) * sz;
   PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (3 + R() * 4.5) * sz, far(col), { a: .87, sp: 1.25 * U, dry: .18, jit: 9 });
 }
+function trunkStroke(x, y) {
+  const R = PP.R, t = zt, xm = px(t.x), w = Math.max(1.7 * U, t.hw * 2 * PW), l = (3 + R() * 6) * U, y0 = py(trunkTop(t)), y1 = py(t.foot), o = { a: .95, jit: 7, dry: .04, bow: .02, sp: Math.min(1.1 * U, w) };
+  const far = c => t.far ? mix(c, pal.cityFar, t.far) : c, a = Math.max(y0, y - l), b = Math.min(y1, y + l);
+  veil(.4 + t.far);
+  PP.brush(xm, a, xm, b, w, far(mix(pal.trunk, pal.towerLight, .1)), o);
+  if (w > 2.6 * U && R() < .6) PP.brush(xm - w * .26, a, xm - w * .26, b, w * .3, far(white ? pal.snow : mix(pal.trunk, pal.towerLight, .45)), { a: .7, jit: 5, dry: .04, bow: .02, sp: Math.min(1.1 * U, w * .3) });   // its sunny side
+}
+function anyTrunk() {                                          // they are thin: each gets strokes of its own
+  const R = PP.R, t = pick(trees, R()), x = px(t.x), y = py(trunkTop(t) + R() * (t.foot - trunkTop(t)));
+  if (x < 0 || x >= W || y < 0 || y >= H || !at(x, y)) return;
+  if (zone(fx(x), fy(y)) === TRUNK && zt === t) trunkStroke(x, y);
+}
 
 // ---------- the far bank ----------
 function shadeAt(xf, pf) {                                     // the bridge keeps the light off what lies under it
   if (xf > .46 || bridgeOf(xf, pf) < DECKV) return 0;
   return smooth(.46, .37, xf) * (sun ? .62 : night ? .2 : .34);
 }
-function groundStroke(x, y) {                                  // the street up there: the pavement, the railing over the wall
-  const R = PP.R, xf = zx, pf = zy, wt = wallTop(xf), t = (pf - STREET) / (wt - STREET), o = crisp();
+// The street up there, seen almost level: a pavement along the houses, the roadway, a pavement along the wall with
+// the trees and a railing.  How far down from the horizon to the top of the wall each begins:
+const KERB = .1, ROADWAY = .16, LINE = .36, KERB2 = .66, WALK = .72, RAILS = .8;
+function groundStroke(x, y) {
+  const R = PP.R, xf = zx, pf = zy, wt = wallTop(xf), t = (pf - HOR) / (wt - HOR), sc = near(xf), o = crisp();
   veil(.4);
-  const n = fbm(x * .03 / U + 5, y * .1 / U);
-  let col = mix(pal.pave, n > .5 ? pal.paveLight : pal.paveDark, Math.abs(n - .5) * .7);
-  if (t > .86 && xf > RAILEND) col = mix(pal.quayLight, pal.dark, (Math.floor(xf / (.006 * near(xf))) & 1) * .5);   // the railing
-  else if (white) col = mix(col, pal.snow, white * .8);
-  if (night) col = mix(col, pal.lights[1], .14);
-  const l = (3 + R() * 6) * U;
-  PP.brush(x - l, y, x + l, y, 1.6 * U, col, o);
+  const n = fbm(x * .03 / U + 5, y * .1 / U), e = .01, sl = (wallTop(xf + e) - wallTop(xf - e)) / (2 * e) * clamp(t) * PH / PW, k = 1 / Math.hypot(1, sl);   // it climbs to the bridge
+  const paving = mix(mix(pal.pave, pal.paveLight, .45), n > .5 ? pal.paveLight : pal.paveDark, Math.abs(n - .5) * .5);
+  let col, l = (4 + R() * 8) * U, w = 1.5 * U, yc = y;
+  if (t < KERB || t >= WALK) {                                 // the pavements
+    col = white ? mix(paving, pal.snow, white * .85) : paving;
+    if (t >= RAILS && xf > RAILEND) {                          // the railing over the wall: a rail, and a post every so often
+      const post = Math.floor(xf / (.005 * sc)) % 3 === 0;
+      if (t < RAILS + .05) col = pal.girderDark; else if (post) { PP.brush(x, Math.max(py(HOR + (wt - HOR) * RAILS), y - 3 * U), x, Math.min(py(wt), y + 3 * U), U, pal.girderDark, o); return; }
+    }
+  } else if (t < ROADWAY || t >= KERB2) col = white ? mix(pal.quayLight, pal.snow, white) : mix(pal.quayLight, pal.paveLight, .5);   // the kerbs
+  else {                                                       // the roadway, a broken line down its middle
+    col = mix(mix(pal.asphalt, pal.shade, .3), n > .5 ? pal.pave : pal.shade, Math.abs(n - .5) * .35);
+    if (white) col = mix(col, pal.snow, white * .3);
+    if (Math.abs(t - LINE) < .05 && (wt - HOR) * PH > 14 * U && (Math.floor(xf / (.014 * sc)) & 1)) { col = pal.roadLine; yc = py(HOR + (wt - HOR) * LINE); l = 2.5 * U; w = U; }
+  }
+  if (sun) for (const tr of trees) {                           // the shade of the trees lies across it
+    const dx = ((xf - tr.x) * .75 - tr.r * .8) / (tr.r * 1.25), dy = (pf - tr.foot) / (tr.r * .2);
+    if (dx > -1 && dx < 1 && dx * dx + dy * dy < 1) { col = mix(col, pal.shade, .3); break; }
+  }
+  if (night) col = mix(col, pal.lights[1], .13);
+  clearOfTrunks(x, pf, x - k * l, x + k * l);
+  PP.brush(span[0], yc + (span[0] - x) * sl, span[1], yc + (span[1] - x) * sl, w, col, o);
 }
 // What is sprayed on the upper wall: piece beside piece, each a field of colour with a few fat letters in another.
 function piece(xf, t) {                                        // 0 where the wall is bare, else which paint
@@ -521,7 +572,7 @@ function girderStroke(x, y) {                                  // green steel: a
 function paintAt(x, y) {
   const k = zone(fx(x), fy(y));
   if (k === HOUSE) houseStroke(x, y); else if (k === CYL) cylStroke(x, y); else if (k === SLABZ) slabStroke(x, y);
-  else if (k === SLOTZ || k === HALL || k === LEG) towerFootStroke(x, y, k); else if (k === TREE) treeStroke(x, y);
+  else if (k === SLOTZ || k === HALL || k === LEG) towerFootStroke(x, y, k); else if (k === TREE) treeStroke(x, y); else if (k === TRUNK) trunkStroke(x, y);
   else if (k === GROUND) groundStroke(x, y); else if (k === UWALL) wallStroke(x, y); else if (k === PROM) promStroke(x, y);
   else if (k === QUAY) quayStroke(x, y); else if (k === CRATEZ) crateStroke(x, y); else if (k === WATER) waterStroke(x, y);
   else if (k === DECK) deckStroke(x, y); else if (k === RAILING) railStroke(x, y); else if (k === GIRDER) girderStroke(x, y);
@@ -551,6 +602,8 @@ function tone(k) {                                             // the colour of 
   if (k === SLOTZ || k === HALL) return mix(pal.uDark, pal.uGreen, .2);
   if (k === LEG) return pal.uConcrete;
   if (k === TREE) return traits.bare ? mix(pal.stone, pal.folDark, .4) : mix(pal.folDark, pal.folMid, .45);
+  if (k === TRUNK) return pal.trunk;
+  if (k === GROUND) { const t = (zy - HOR) / (wallTop(zx) - HOR); return t >= ROADWAY && t < KERB2 ? mix(pal.asphalt, pal.shade, .3) : white ? mix(pal.pave, pal.snow, white * .7) : mix(pal.pave, pal.paveLight, .4); }
   if (k === GROUND || k === PROM) return white ? mix(pal.pave, pal.snow, white * .7) : pal.pave;
   if (k === UWALL) return mix(mix(pal.quay, pal.tag[(hash1(zx * 22 | 0) * 9) | 0], .35), pal.shade, shadeAt(zx, zy));
   if (k === QUAY) return mix(mix(pal.quay, pal.quayDark, .35), pal.shade, shadeAt(zx, zy));
@@ -564,7 +617,7 @@ function coatStroke(x0, y0) {                                  // a fresh coat: 
     const x = x0 + (n % 3 - 1 + (R() - .5) * .6) * 22 * U, y = y0 + ((n / 3 | 0) - .5 + (R() - .5) * .6) * 20 * U;
     if (x < -20 * U || x > W + 20 * U || y > H + 12 * U) continue;
     const k = zone(fx(clamp(x, 0, W - 1)), fy(Math.min(y, H - 1))), l = (14 + R() * 8) * U;
-    if (k === SKY || (k >= GROUND && k !== WATER)) continue;   // the bank and the bridge are narrow things: see below
+    if (k === SKY || k === TRUNK || (k >= GROUND && k !== WATER)) continue;   // the bank and the bridge are narrow things: see below
     veil(k === WATER ? .1 : .45);
     if (k === WATER) PP.brush(x - l * 1.6, y, x + l * 1.6, y, 26 * U, tone(k), o);
     else if (k === TREE) { const a = (R() - .5) * 1.2; PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, 22 * U, tone(k), o); }
@@ -576,6 +629,7 @@ function coatStroke(x0, y0) {                                  // a fresh coat: 
     const x = x0 + (n % 3 - 1 + (R() - .5) * .5) * 22 * U, y = y0 + ((n / 3 | 0) - 2.5 + (R() - .5) * .5) * 6.6 * U;
     if (x < -20 * U || x > W + 20 * U || y > H + 8 * U) continue;
     const k = zone(fx(clamp(x, 0, W - 1)), fy(Math.min(y, H - 1))), l = 15 * U;
+    if (k === TRUNK) { PP.brush(px(zt.x), y - 8 * U, px(zt.x), Math.min(py(zt.foot), y + 8 * U), Math.max(2 * U, zt.hw * 2 * PW), tone(k), o); continue; }
     if (k < GROUND || k === WATER) continue;
     veil(.3);
     if (k >= DECK) { bridgeDir(zv); PP.brush(x - bdir[0] * l, y - bdir[1] * l, x + bdir[0] * l, y + bdir[1] * l, 9 * U, tone(k), o); }
@@ -665,7 +719,7 @@ function drawBoat(P, t) {                                      // now and then a
 
 // ---------- the painting, one frame's worth ----------
 let tops = null;
-const RATE = { town: 15000, tower: 17000, canal: 15000, bridge: 9000, water: 6500, glint: 70, fog: 1500 };
+const RATE = { town: 15000, tower: 17000, canal: 15000, bridge: 9000, water: 6500, trunk: 10, glint: 70, fog: 1500 };
 const place = {
   colors: {
     water: '#67764b', waterLight: '#a9b48b', waterDark: '#3a4a32',
@@ -733,6 +787,7 @@ const place = {
   paint(pace, s, o) {                                          // s, o: the picture and the one under it, where they show this place
     const ua = U * U * 1e6;
     clipBand(landTop, H);
+    spend('dk-trunk', RATE.trunk * W / PW * pace, anyTrunk);
     spend('dk-town', RATE.town * W * (townFoot - landTop) * .5 / ua * pace, townStroke);
     if (tw[2] > tw[0]) spend('dk-tower', RATE.tower * (tw[2] - tw[0]) * (tw[3] - tw[1]) / ua * pace, towerStroke);
     spend('dk-canal', RATE.canal * W * (canalFoot - py(.59)) / ua * pace, canalStroke);
