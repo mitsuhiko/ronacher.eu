@@ -352,24 +352,16 @@ function shadeAt(xf, pf) {                                     // the bridge kee
   if (xf > .46 || bridgeOf(xf, pf) < DECKV) return 0;
   return smooth(.46, .37, xf) * (sun ? .62 : night ? .2 : .34);
 }
-function groundStroke(x, y) {                                  // the street up there: the pavement, cars along the kerb, the railing over the wall
-  const R = PP.R, xf = zx, pf = zy, wt = wallTop(xf), t = (pf - STREET) / (wt - STREET), sc = near(xf), o = crisp();
+function groundStroke(x, y) {                                  // the street up there: the pavement, the railing over the wall
+  const R = PP.R, xf = zx, pf = zy, wt = wallTop(xf), t = (pf - STREET) / (wt - STREET), o = crisp();
   veil(.4);
-  const n = fbm(x * .03 / U + 5, y * .1 / U), cw = .052 * sc, i = Math.floor(xf / cw), u = xf / cw - i, hh = hash1(i * 37 + 5);
-  let col = mix(pal.pave, n > .5 ? pal.paveLight : pal.paveDark, Math.abs(n - .5) * .7), la = -1e9, lb = 1e9, w = 1.6 * U;
-  if (xf > RAILEND && wt - STREET > .012 && t > .46 && t < .8 && hh < .55 && u > .08 && u < .92) {   // a car
-    const body = pal.cars[(hh * 1.8 * pal.cars.length) | 0], cab = u > .26 && u < .72;
-    la = px((i + .08) * cw); lb = px((i + .92) * cw); w = 1.3 * U;
-    if (t >= .61) { col = body; if (t > .73 && (Math.abs(u - .25) < .06 || Math.abs(u - .75) < .06)) { col = pal.ink; la = px((i + (u < .5 ? .19 : .69)) * cw); lb = px((i + (u < .5 ? .31 : .81)) * cw); } }   // its wheels
-    else if (!cab) { la = -1e9; lb = 1e9; }
-    else { la = px((i + .26) * cw); lb = px((i + .72) * cw); col = t < .5 ? (white ? pal.snow : body) : mix(pal.dark, pal.glass, .45); }
-  } else {
-    if (t > .86 && xf > RAILEND) col = mix(pal.quayLight, pal.dark, (Math.floor(xf / (.006 * sc)) & 1) * .5);   // the railing
-    else if (white) col = mix(col, pal.snow, white * .8);
-    if (night) col = mix(col, pal.lights[1], .14);
-  }
+  const n = fbm(x * .03 / U + 5, y * .1 / U);
+  let col = mix(pal.pave, n > .5 ? pal.paveLight : pal.paveDark, Math.abs(n - .5) * .7);
+  if (t > .86 && xf > RAILEND) col = mix(pal.quayLight, pal.dark, (Math.floor(xf / (.006 * near(xf))) & 1) * .5);   // the railing
+  else if (white) col = mix(col, pal.snow, white * .8);
+  if (night) col = mix(col, pal.lights[1], .14);
   const l = (3 + R() * 6) * U;
-  PP.brush(Math.max(la, x - l), y, Math.min(lb, x + l), y, w, col, o);
+  PP.brush(x - l, y, x + l, y, 1.6 * U, col, o);
 }
 // What is sprayed on the upper wall: piece beside piece, each a field of colour with a few fat letters in another.
 function piece(xf, t) {                                        // 0 where the wall is bare, else which paint
@@ -593,30 +585,9 @@ function coatStroke(x0, y0) {                                  // a fresh coat: 
 }
 
 // ---------- what moves ----------
-// Cars cross the bridge, and now and then the white coach: [when, how often, how long it takes, which way (1: away
-// from us), what (0 a car, 1 the coach, 2 a van), which colour].  How far along the bridge one is says where it is
-// in the picture and how big.
-const TRAFFIC = [[2, 47, 20, 1, 0, 0], [15, 83, 24, -1, 1, 0], [9, 39, 18, -1, 0, 2], [28, 53, 19, 1, 0, 1], [36, 71, 21, 1, 2, 3], [44, 43, 18, -1, 0, 4]];
 const BRIDGE_LAMPS = [.452, .368, .25, .088, -.19, -.62, -1.3];
-function drawTraffic(P, t) {
-  for (let i = 0; i < TRAFFIC.length; i++) {
-    const [t0, every, dur, dir, kind, ci] = TRAFFIC[i];
-    let u = ((t - t0) % every + every) % every / dur; if (u >= 1) continue;
-    if (dir < 0) u = 1 - u;
-    const len = kind === 1 ? .63 : kind === 2 ? .3 : .23, hv = kind === 1 ? .0475 : kind === 2 ? .034 : .021, lane = dir > 0 ? .6355 : .6285;
-    const za = .42 + u * 10, al = smooth(10.4, 7.5, za), X = f => BVX - 1 / (za + len * f);   // a point of it: 0 its near end, 1 its far one
-    if (px(X(1)) < -4 || px(X(0)) > W + 4 || !al || !at(clamp(px(X(.5)), 0, W - 1), py(BVY))) continue;
-    P.R = rng(7300 + i);                                       // each keeps its own shape, whoever else is about
-    const Y = (f, k) => py(bridgeY(lane - hv * k, X(f))), s = (BVX - X(.5)) / BVX;
-    const box = (f0, f1, k0, k1, col) => P.shape([[px(X(f0)), Y(f0, k1)], [px(X(f1)), Y(f1, k1)], [px(X(f1)), Y(f1, k0)], [px(X(f0)), Y(f0, k0)]], col, { base: al, hd: 0, wob: .35 * U, jit: 3 });
-    const paint = kind === 1 ? pal.bus : pal.cars[ci % pal.cars.length], body = night ? mix(paint, pal.shade, .45) : paint, pane = night && kind === 1 ? pal.lights[2] : mix(pal.dark, pal.glass, .4);
-    if (kind === 0) { box(0, 1, .12, .62, body); box(.22, .78, .55, 1, body); box(.28, .72, .62, .92, pane); }
-    else if (kind === 1) { box(0, 1, .08, 1, body); box(.03, .97, .52, .84, pane); box(0, 1, .22, .3, pal.cabin); }
-    else { box(0, 1, .1, 1, body); box(dir > 0 ? .68 : .05, dir > 0 ? .95 : .32, .55, .88, pane); }
-    for (const f of kind === 1 ? [.14, .8] : [.2, .8]) P.dab(px(X(f)), Y(f, .07), Math.max(U, .0035 * s * PH), pal.ink, { a: al, den: 2.5, core: al, s: U, jit: 2 });   // its wheels
-    if (night) for (const f of [0, 1]) P.dab(px(X(f)), Y(f, .3), Math.max(1.2 * U, .0028 * s * PH), (f === 1) === (dir > 0) ? pal.lights[2] : pal.beacon, { a: al, den: 2.5, core: al, s: U, jit: 3 });
-  }
-  for (let i = 0; i < BRIDGE_LAMPS.length; i++) {              // the lamps on the railing stand in front of them all
+function drawBridgeLamps(P) {                                  // the lamps on the railing of the bridge: too thin for the brush that paints it
+  for (let i = 0; i < BRIDGE_LAMPS.length; i++) {
     const xf = BRIDGE_LAMPS[i], x = px(xf), s = (BVX - xf) / BVX, y0 = py(bridgeY(RAIL, xf)), y1 = py(bridgeY(.6, xf)), r = Math.max(1.6 * U, .0045 * s * PH);
     if (x < -r * 4 || x > W + r * 4 || !at(clamp(x, 0, W - 1), y1)) continue;
     P.R = rng(7400 + i);
@@ -652,22 +623,38 @@ function drawPromenade(P, t) {
     P.dab(x + (bike ? dir * h * .14 : 0), y - h * .96, h * .1, pal.skin, { a: 1, den: 2, core: .9, s: Math.max(.5 * U, h * .05), jit: 3 });
   }
 }
+function belowBridge(c) {                                      // the water as far as the bridge does not hide it
+  const xe = px(ABUT), bot = f => py(bridgeY(DECKV + depthAt(f), f));
+  c.beginPath(); c.moveTo(W, 0); c.lineTo(W, H); c.lineTo(Math.min(0, xe), H);
+  if (xe > 0) { for (let x = 0; x < xe; x += 6 * U) c.lineTo(x, bot(fx(x))); c.lineTo(xe, bot(ABUT - .001)); }
+  c.lineTo(Math.max(0, xe), 0); c.closePath();
+}
 function drawBoat(P, t) {                                      // now and then a boat comes down the canal, and the light on the tower blinks
-  const u = (t % 150) / 75;
-  if (u <= 1) {
-    const ga = 1 / (Math.max(X0, -1.9) - .3 - CVX), gb = 1 / (X1 + .3 - CVX), xc = CVX + 1 / (ga + (gb - ga) * u), n = 10, c = .83;
-    const len = .16 * near(xc), white = mix(pal.hull, pal.dark, night ? .5 : 0);
+  const u = (t % 150) / 75, c = .83;                           // the line it keeps to
+  const ga = 1 / (Math.max(X0, -1.9) - .35 - CVX), gb = 1 / (X1 + .35 - CVX), xa = CVX + 1 / (ga + (gb - ga) * u), len = .2 * near(xa), xm = xa + len / 2;
+  if (u <= 1 && px(xa + len) > -60 * U && px(xa - len) < W && at(clamp(px(xm), 0, W - 1), clamp(py(lineY(c, xm)), 0, H - 1))) {
+    // A point of it: f from its stern (0) to its bow (1), k how high above the water, in hulls
+    const pt = (f, k) => { const x = xa + f * len; return [px(x), py(lineY(c, x)) - k * .0125 * near(x) * PH + Math.sin(t * 1.1) * .4 * U]; };
+    const h = .0125 * near(xm) * PH, solid = { hd: 0, wob: .2 * U, jit: 2 }, thin = w => ({ a: .95, sp: Math.max(.7 * U, w), dry: 0, jit: 3, bow: 0 });
+    const hull = mix(pal.hull, pal.dark, night ? .5 : 0), keel = mix(pal.crate, pal.dark, .45), pane = night ? pal.lights[0] : mix(pal.dark, pal.glass, .45);
     P.R = rng(7600);
-    for (let i = -5; i < n; i++) {                             // slice by slice: behind the bridge it is not to be seen
-      const xa = xc + (i / n - .5) * len, xb = xa + len / n * 1.03, xm = (xa + xb) / 2, ym = py(lineY(c, xm));
-      if (px(xb) < 0 || px(xa) > W || !at(clamp(px(xm), 0, W - 1), Math.min(ym, H - 1)) || zone(xm, fy(Math.min(ym, H - 1))) !== WATER) continue;
-      const Y = (f, k) => py(lineY(c, f)) - k * .011 * near(f) * PH;
-      const box = (k0, k1, col) => P.shape([[px(xa), Y(xa, k1)], [px(xb), Y(xb, k1)], [px(xb), Y(xb, k0)], [px(xa), Y(xa, k0)]], col, { hd: 0, wob: .3 * U, jit: 3 });
-      if (i < 0) { P.brush(px(xa), Y(xa, -.5 + i * .12), px(xb), Y(xb, -.5 + i * .12) + (i & 1 ? U : 0), 1.3 * U, pal.waterLight, { a: .65 + i * .1, sp: U, dry: .2, bow: .2 }); continue; }   // its wake
-      box(-.5, i === n - 1 ? .3 : .5, i === n - 1 ? mix(white, pal.dark, .2) : white);
-      box(-.5, -.25, mix(pal.dark, pal.cabin, .5));            // the waterline
-      if (i > 0 && i < n - 2) { box(.5, 1.9, white); if (i & 1) box(.8, 1.55, night ? pal.lights[0] : mix(pal.dark, pal.glass, .45)); box(1.9, 2.1, mix(white, pal.dark, .3)); }
+    P.c.save(); belowBridge(P.c); P.c.clip();
+    const foam = mix(pal.waterLight, pal.hull, night ? .15 : .45);
+    for (const side of [.55, -1]) for (let i = 0; i < 4; i++) {   // its wake: two lines that part astern, the nearer one the longer
+      const a = pt(-.02 - i * .2, -.3 + side * i * .3), b = pt(-.24 - i * .2, -.3 + side * (i + 1.1) * .3);
+      P.brush(a[0], a[1], b[0], b[1], (1.9 - i * .25) * U, foam, { a: .75 - i * .16, sp: U, dry: .08, jit: 3, bow: .05 });
     }
+    { const a = pt(1.01, -.28), b = pt(.8, -.72); P.brush(a[0], a[1], b[0], b[1], 1.5 * U, foam, { a: .65, sp: U, dry: .08, jit: 3, bow: .1 }); }   // the wave at its bow
+    { const a = pt(.02, -.55), b = pt(.93, -.55); P.brush(a[0], a[1], b[0], b[1], h * .45, pal.waterDark, { a: .4, sp: Math.max(U, h * .2), dry: 0, jit: 3, bow: 0 }); }   // its shade on the water
+    P.shape([pt(0, .58), pt(.86, .6), pt(1, .82), pt(.94, -.3), pt(.015, -.3)], hull, solid);                  // the hull, its bow drawn up
+    P.shape([pt(.008, .08), pt(.975, .1), pt(.94, -.3), pt(.015, -.3)], keel, solid);                           // dark blue down to the water
+    P.shape([pt(.15, .55), pt(.15, 1.72), pt(.72, 1.72), pt(.79, .55)], hull, solid);                           // the saloon
+    for (let i = 0; i < 6; i++) { const f = .175 + i * .094; P.shape([pt(f, .95), pt(f, 1.45), pt(f + .068, 1.45), pt(f + .068 + (i === 5 ? .022 : 0), .95)], pane, solid); }
+    { const a = pt(.13, 1.8), b = pt(.745, 1.8); P.brush(a[0], a[1], b[0], b[1], Math.max(U, h * .16), mix(hull, pal.dark, .4), thin(h * .16)); }   // its roof
+    { const a = pt(0, .95), b = pt(.15, .95), d = pt(0, .58); P.brush(a[0], a[1], b[0], b[1], Math.max(.7 * U, h * .08), mix(hull, pal.dark, .5), thin(h * .08)); P.brush(a[0], a[1], d[0], d[1], Math.max(.7 * U, h * .08), mix(hull, pal.dark, .5), thin(h * .08)); }   // the rail round the after deck
+    { const a = pt(.03, .58), b = pt(.03, 1.7), f = pt(.055, 1.5); P.brush(a[0], a[1], b[0], b[1], Math.max(.7 * U, h * .07), pal.ink, thin(h * .07)); P.dab(f[0], f[1], Math.max(1.1 * U, h * .2), pal.cabin, { a: 1, den: 2.5, core: 1, s: Math.max(.6 * U, h * .12), jit: 2 }); }   // and the flag over it
+    if (night) { const b = pt(.9, .95); P.dab(b[0], b[1], Math.max(1.1 * U, h * .14), pal.lights[2], { a: 1, den: 2.5, core: 1, s: U, jit: 2 }); }
+    P.c.restore();
   }
   const x = px(TOP_OF_ALL[0]), y = py(TOP_OF_ALL[1]) - 2 * U, a = Math.pow(Math.max(0, Math.sin(t * 2.1)), 2);
   if (x < 0 || x >= W || y < 0 || !at(x, y) || !night || a < .05 || traits.fog) return;
@@ -689,7 +676,7 @@ const place = {
     pave: '#a09d97', paveLight: '#cdcac1', paveDark: '#66655f', asphalt: '#6b6c6f', roadLine: '#e6e3da',
     girder: '#7c9c72', girderLight: '#aac59a', girderDark: '#48634a',
     tag: ['#7a3fa8', '#f2c230', '#e2562d', '#2f9aa0', '#2f55a6', '#f4f1e6', '#1c1e24', '#3f9a4f', '#e86aa0'],
-    crate: '#2f55a6', crateTop: '#8fa3cc', bus: '#f3f2ec', cars: ['#f4f1e6', '#2b3442', '#b3463a', '#9aa3aa', '#3d5a80'],
+    crate: '#2f55a6', crateTop: '#8fa3cc',
     coats: ['#b8453a', '#2c4f7c', '#e6dcc0', '#3f7a58'], skin: '#e0b89a', snow: '#eef2f4',
   },
   seasons: {
@@ -764,7 +751,7 @@ const place = {
     PP.haze = null;
     c.restore();
   },
-  sprites: [{ draw: drawBoat, t0: 4, seed: 131 }, { draw: drawPromenade, t0: 3, seed: 132 }, { draw: drawTraffic, t0: 3, seed: 133 }],
+  sprites: [{ draw: drawBoat, t0: 4, seed: 131 }, { draw: drawPromenade, t0: 3, seed: 132 }, { draw: drawBridgeLamps, t0: 3, seed: 133 }],
 };
 return place;
 } });
