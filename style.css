@@ -427,7 +427,7 @@ html.night .stamp img {
   --stroke: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 8' preserveAspectRatio='none'%3E%3Cpath d='M1,5 C12,2.6 22,6.4 36,4.3 S62,5.8 76,3.9 S93,5 99,3.5' fill='none' stroke='%23000' stroke-width='1.5' stroke-linecap='round' vector-effect='non-scaling-stroke'/%3E%3C/svg%3E");
 }
 
-/* Season and theme, pencilled into the corner */
+/* Place, season, weather and theme, pencilled into the corner */
 .controls {
   position: fixed;
   right: 0.8rem;
@@ -455,6 +455,18 @@ html.night .stamp img {
 .controls button:focus-visible {
   opacity: 1;
   outline: none;
+}
+
+@media only screen and (max-width: 380px) {
+  .controls {
+    right: 0.5rem;
+    gap: 0.3rem;
+  }
+
+  .controls button {
+    font-size: 0.9rem;
+    padding: 0.08rem 0.45rem 0.14rem;
+  }
 }
 
 @media only screen and (max-width: 700px) {
