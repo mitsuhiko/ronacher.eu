@@ -2,7 +2,17 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1" />
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<script>
+(function () {
+  var d = document.documentElement, m = 'auto';
+  try { m = localStorage.getItem('ronacher-theme') || 'auto'; } catch (e) {}
+  var q = /[?&]theme=(\w+)/.exec(location.search); if (q) m = q[1];
+  d.classList.add('js');
+  if (m === 'night' || (m !== 'day' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches)) d.classList.add('night');
+})();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Crimson+Text:ital,wght@0,400;0,600;0,700;1,400;1,600;1,700&display=block" rel="stylesheet">
@@ -10,42 +20,54 @@
 <title>Armin Ronacher</title>
 </head>
 <body>
-<canvas id="ocean-canvas"></canvas>
-<script src="ocean.js"></script>
+<canvas id="scene" aria-hidden="true"></canvas>
+<canvas id="sprites" aria-hidden="true"></canvas>
+<div class="grain" aria-hidden="true"></div>
 <main>
-  <div class="card-container">
-    <section class="card" aria-labelledby="intro-title">
-      <header class="card-header">
-        <img src="avatar-large.jpg" alt="" class="avatar">
-        <div>
-          <h1 id="intro-title">Armin Ronacher</h1>
-          <p class="tagline">Building Teams, Software and Products</p>
-        </div>
-      </header>
-      <div class="card-content">
-        <p>
-          I build teams and software — particularly Open Source software.
-          You might know me as creator of <a href="https://flask.palletsprojects.com/">Flask</a> or
-          <a href="https://lucumr.pocoo.org/projects/">other Open Source projects</a>.
-        </p>
-        <p>
-          For a decade I poured my energy into <a href="https://sentry.io/welcome/">Sentry</a>.
-          Now <a href="https://lucumr.pocoo.org/2025/3/31/leaving/">building something new</a> at
-          <a href="https://earendil.com/">Earendil</a>.
-        </p>
-        <ul>
-          <li>Read my <a href="https://lucumr.pocoo.org/">Technology Blog</a></li>
-          <li>or my <a href="https://dark.ronacher.eu/">Darker Thoughts</a></li>
-          <li>Follow me as <a href="https://bsky.app/profile/mitsuhiko.at">@mitsuhiko.at</a> on Bluesky</li>
-          <li>or <a href="https://twitter.com/@mitsuhiko">mitsuhiko</a> on Twitter/X</li>
-          <li>Find me as <a href="https://github.com/mitsuhiko">mitsuhiko</a> on GitHub</li>
-          <li>You can also <a href="https://github.com/sponsors/mitsuhiko">sponsor me</a></li>
-          <li>Or <a href="mailto:armin.ronacher@active-4.com">send me an email</a></li>
-          <li>Or <a href="https://lucumr.pocoo.org/about/">learn more about me</a></li>
-        </ul>
-      </div>
-    </section>
-  </div>
+  <article class="postcard" aria-labelledby="intro-title">
+    <button class="card-close" type="button" aria-label="Put the postcard away"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.2,5.4 C8,8 11.5,11.6 14.9,14.7 M14.7,5.2 C11.8,8.3 8.4,11.5 5.3,14.8"/></svg></button>
+    <header class="card-head">
+      <h1 id="intro-title" class="write">Armin Ronacher</h1>
+      <p class="tagline write">Building Teams, Software and Products</p>
+    </header>
+    <div class="stamp-area" aria-hidden="true">
+      <div class="stamp-shadow"><div class="stamp"><img src="avatar-large.jpg" alt=""></div></div>
+    </div>
+    <div class="message write">
+      <p>
+        I build teams and software — particularly Open Source software.
+        You might know me as creator of <a href="https://flask.palletsprojects.com/">Flask</a> or
+        <a href="https://lucumr.pocoo.org/projects/">other Open Source projects</a>.
+      </p>
+      <p>
+        For a decade I poured my energy into <a href="https://sentry.io/welcome/">Sentry</a>.
+        Now <a href="https://lucumr.pocoo.org/2025/3/31/leaving/">building something new</a> at
+        <a href="https://earendil.com/">Earendil</a>.
+      </p>
+    </div>
+    <ul class="address write">
+      <li>Read my <a href="https://lucumr.pocoo.org/">Technology Blog</a></li>
+      <li>or my <a href="https://dark.ronacher.eu/">Darker Thoughts</a></li>
+      <li>Follow me as <a href="https://bsky.app/profile/mitsuhiko.at">@mitsuhiko.at</a> on Bluesky</li>
+      <li>or <a href="https://twitter.com/@mitsuhiko">mitsuhiko</a> on Twitter/X</li>
+      <li>Find me as <a href="https://github.com/mitsuhiko">mitsuhiko</a> on GitHub</li>
+      <li>You can also <a href="https://github.com/sponsors/mitsuhiko">sponsor me</a></li>
+      <li>Or <a href="mailto:armin.ronacher@active-4.com">send me an email</a></li>
+      <li>Or <a href="https://lucumr.pocoo.org/about/">learn more about me</a></li>
+    </ul>
+  </article>
 </main>
+<button id="card-open" class="mini-card" type="button" hidden aria-label="Show the postcard again">
+  <img src="avatar-large.jpg" alt="">
+  <span class="mini-name">Armin Ronacher</span>
+  <span class="mini-lines"></span>
+</button>
+<nav class="controls" aria-label="Picture">
+  <button id="season-toggle" type="button">summer</button>
+  <button id="weather-toggle" type="button">sunny</button>
+  <button id="theme-toggle" type="button">auto</button>
+</nav>
+<script src="scene.js"></script>
+<script src="postcard.js"></script>
 </body>
 </html>
