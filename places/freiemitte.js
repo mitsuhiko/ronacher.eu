@@ -13,7 +13,7 @@
  * ------------------------------------------------------------------ */
 (window.viennaPlaces = window.viennaPlaces || []).push({ id: 'freiemitte', name: 'Freie Mitte', make(kit) {
 'use strict';
-const { PP, clamp, smooth, mix, pick, hash1, vnoise, fbm, wind, light, spend, clipBand } = kit;
+const { PP, clamp, smooth, mix, pick, rng, hash1, vnoise, fbm, wind, light, spend, clipBand } = kit;
 const MAP = window.viennaMaps.freiemitte;
 
 // ---------- what the brush is looking at ----------
@@ -383,25 +383,28 @@ function coatStroke(x0, y0) {                                  // a fresh coat: 
 }
 
 // ---------- what moves ----------
-// People walk up and down the promenade, now and then.
-const WALK = [[.668, .56], [.69, .6], [.71, .65], [.725, .7], [.752, .75], [.785, .81], [.82, .86], [.86, .92], [.9, .98]];
-function onWalk(u) {                                           // a point along the promenade, 0 at its far end
-  const n = WALK.length - 1, f = clamp(u) * n, i = Math.min(n - 1, Math.floor(f)), t = f - i;
-  return [WALK[i][0] + (WALK[i + 1][0] - WALK[i][0]) * t, WALK[i][1] + (WALK[i + 1][1] - WALK[i][1]) * t];
-}
-const WALKERS = [[0, 70, 1, .35, 0], [23, 80, -1, -.3, 1], [41, 62, 1, .1, 2], [55, 90, -1, .3, 3]];   // [when, how long the walk takes, which way, which side, coat]
+// People stroll along the promenade, now and then: come out by the high tower and leave the picture at its lower edge,
+// or the other way.  From up here a walker is a coat, a head and a long shadow, and bobs a little.
+const WALK = [[.565, .662], [.58, .675], [.6, .689], [.62, .7045], [.64, .7145], [.68, .7285], [.7, .735], [.72, .743], [.74, .757], [.76, .772], [.78, .78], [.8, .784], [.82, .794],
+  [.84, .8025], [.86, .81], [.88, .8215], [.92, .8405], [.96, .86], [1, .88], [1.04, .9]];   // the middle of the promenade: how far down the photo, how far across
+const WALK0 = WALK[0][0], WALK1 = WALK[WALK.length - 1][0];
+function walkX(pf) { for (let i = 1; i < WALK.length; i++) if (pf <= WALK[i][0]) { const a = WALK[i - 1], b = WALK[i]; return a[1] + (b[1] - a[1]) * (pf - a[0]) / (b[0] - a[0]); } return WALK[WALK.length - 1][1]; }
+const WALKERS = [[0, 97, 52, 1, -.45, 0], [31, 113, 60, -1, .5, 1], [58, 131, 48, 1, -.3, 2], [12, 89, 56, -1, .35, 3]];   // [when, how often, how long the walk takes, which way, which side, coat]
 function drawWalkers(P, t) {
-  for (const [t0, dur, dir, lane, k] of WALKERS) {
-    const u = ((t - t0) % 100 + 100) % 100 / dur;
-    if (u > 1) continue;
-    const [xf, pf] = onWalk(dir > 0 ? u * .9 + .04 : .94 - u * .9), d = near(pf), x = px(xf + lane * .02 * d), y = py(pf);
-    if (x < 0 || x > W || y < 0 || y > H || !at(x, y) || zone(x, y) !== HARD) continue;
-    const h = .03 * PH * d, step = Math.sin(t * 7 + k) * h * .16, o = { a: .95, sp: Math.max(.6 * U, h * .06), dry: 0, jit: 4, bow: 0 };
-    if (!night && traits.shadow) P.brush(x, y, x + h * .6, y - h * .1, h * .14, pal.hards[0], { a: .3, sp: U, dry: 0, jit: 2, bow: 0 });   // the evening sun throws it out long
-    P.brush(x, y - h * .45, x - step, y, h * .1, pal.ink, o);
-    P.brush(x, y - h * .45, x + step, y, h * .1, pal.ink, o);
-    P.brush(x, y - h * .85, x, y - h * .42, h * .2, pal.coats[k % pal.coats.length], o);
-    P.dab(x, y - h * .95, h * .09, pal.skin, { a: 1, den: 2, core: .9, s: Math.max(.5 * U, h * .05), jit: 3 });
+  for (const [t0, every, dur, dir, lane, k] of WALKERS) {
+    let u = ((t - t0) % every + every) % every / dur;
+    if (u >= 1) continue;
+    if (dir < 0) u = 1 - u;
+    const s = .5579 * (Math.exp(1.027 * u) - 1);               // far off a step is a small one: they get faster as they get nearer
+    const pf = WALK0 + (WALK1 - WALK0) * clamp(s), h = .03 * PH * near(pf), x = px(walkX(pf) + lane * .006) + Math.sin(t * 2.7 + k * 2) * h * .02, y0 = py(pf);
+    if (x < -h || x > W + h || y0 < 0 || y0 > H + h || !at(clamp(x, 0, W - 1), Math.min(y0, H - 1))) continue;
+    const al = smooth(0, .07, s), y = y0 - Math.abs(Math.sin(t * 5.4 + k * 2)) * h * .035;   // they come out of the house at the far end; at the near one they walk out of the picture
+    const o = { a: .96 * al, sp: Math.max(.6 * U, h * .06), dry: 0, jit: 3, bow: 0 };
+    P.R = rng(7100 + k);                                       // each keeps its own shape, whoever else is about
+    if (!night && traits.shadow) P.brush(x + h * .06, y0, x + h * .85, y0 - h * .14, h * .14, pal.dark, { a: .42 * al, sp: U, dry: 0, jit: 2, bow: 0 });   // the evening sun throws it out long
+    P.brush(x, y - h * .4, x, y, h * .16, pal.ink, { a: .96 * al, sp: h * .16, dry: 0, jit: 3, bow: 0 });   // no legs to speak of from here: a dark stroke
+    for (let n = 0; n < 2; n++) P.brush(x, y - h * .84, x, y - h * .36, h * .25, pal.coats[k % pal.coats.length], o);   // twice over: a coat is not see-through
+    P.dab(x, y - h * .96, h * .1, pal.skin, { a: al, den: 2, core: .9 * al, s: Math.max(.5 * U, h * .05), jit: 3 });
   }
 }
 
@@ -419,7 +422,7 @@ const place = {
     slate: '#484c55', slateLight: '#8a8f98', zinc: '#aeb2b6', snowy: '#eef2f4', pine: '#2f5a3c', blossom: '#f6f3e2',
     steel: ['#6f7884', '#d5d8da'],
     crate: '#2f55a6', crateTop: '#9aabcb', graffiti: ['#ffffff', '#d83a3a', '#7ec8f0', '#f2d03b'],
-    coats: ['#b8453a', '#2f3e5c', '#e2d6b8', '#4f7a5a'], skin: '#e0b89a',
+    coats: ['#b8453a', '#2c4f7c', '#e6dcc0', '#3f7a58'], skin: '#e0b89a',
   },
   seasons: {
     spring: { meadow: ['#24481f', '#487c2e', '#72a83c', '#9cc64e', '#c6de70'], straw: '#b9c66a' },

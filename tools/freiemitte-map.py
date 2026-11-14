@@ -35,16 +35,22 @@ def along(pts, x): return np.interp(x, [p[0] for p in pts], [p[1] for p in pts])
 # Above the horizon stand the two towers, a house on the right and what sticks out of the town far off.  Each row of
 # the sky has its own colour; whatever is unlike it, where one of those may stand, is not sky.  The cranes are sky.
 HORIZON = .3845
-towers = poly([(.249, .268), (.331, .2575), (.4095, .2755), (.4095, .5), (.25, .5)]) | poly([(.669, .139), (.698, .117), (.782, .1125), (.7765, .33), (.7765, .5), (.658, .5), (.662, .33)])
-near = ndi.binary_dilation(towers, iterations=24) | ((XF > .925) & (XF < .988) & (YF > .325))
+# The high tower is cut out along its walls: glass balconies stick out beyond them on both sides, and painted they
+# look as if something behind the tower showed through.
+TALL = [(.6669, .14), (.695, .117), (.769, .1105), (.783, .1235), (.7817, .14), (.779, .2), (.7772, .25), (.7753, .29), (.7734, .33), (.7714, .38), (.770, .42), (.769, .445),
+        (.769, .5), (.655, .5), (.656, .44), (.658, .38), (.66, .32), (.6625, .26), (.6653, .19)]
+tall = poly(TALL); beside = ndi.binary_dilation(tall, iterations=26) & ~tall
+white = poly([(.249, .268), (.331, .2575), (.4095, .2755), (.4095, .5), (.25, .5)])
+towers = white | tall
+near = ndi.binary_dilation(white, iterations=24) | ((XF > .925) & (XF < .988) & (YF > .325))
 far = (YF > .345) & ~near
 crane = ((XF < .14) & (YF < .3765)) | ((XF > .165) & (XF < .246) & (YF < .3825))
-skyrow = np.stack([np.ma.median(np.ma.array(rgb[..., k], mask=near), axis=1).filled(0) for k in range(3)], -1)   # the colour of the sky, row by row
+skyrow = np.stack([np.ma.median(np.ma.array(rgb[..., k], mask=near | tall | beside), axis=1).filled(0) for k in range(3)], -1)   # the colour of the sky, row by row
 unlike = np.abs(rgb - skyrow[:, None, :]).sum(-1)
-solid = ((near & (unlike > .22)) | (far & (unlike > .16))) & ~crane
+solid = ((near & (unlike > .22)) | (far & (unlike > .16))) & ~crane & ~beside
 solid = ndi.binary_closing(solid, structure=np.ones((7, 7)))
 solid = ndi.binary_opening(solid, structure=np.ones((1, 3)))            # antennas and other thin things
-solid |= ndi.binary_erosion(towers, iterations=6)
+solid |= ndi.binary_erosion(white, iterations=6) | tall
 solid |= YF > HORIZON
 lab, n = ndi.label(solid)
 solid = ndi.binary_fill_holes(lab == lab[WH - 1, 0])                     # only what stands on the ground
@@ -79,7 +85,7 @@ meadow = blur(meadow, 5) + edge * .12 > .5                               # a rag
 
 veg = (Hh > 48) & (Hh < 170) & (S > .2) & (G > B)
 veg &= ground | ((blur(veg, 6) > .45) & ~(towers & (YF < np.where(XF < .5, .47, .53))))   # up on a house only where there is a lot of it, and none on the towers
-teal = (Hh > 150) & (Hh < 205) & (S > .3) & (V > .2) & (B > R + .04)
+teal = (Hh > 150) & (Hh < 190) & (S > .3) & (V > .2) & (B > R + .04)
 veg &= ~teal
 vegN = blur(veg, 8)
 cls = np.where(ground, HARD, WALL).astype(np.uint8)
@@ -90,7 +96,7 @@ warm = (((Hh < 32) | (Hh > 335)) & (S > .18) | ((Hh < 30) | (Hh > 340)) & (S > .
 cls[warm] = WARM
 cls[(Hh >= 18) & (Hh <= 50) & (S > .16) & (S < .6) & (V > .42) & ground] = EARTH
 cls[(cls == CREAM) & (towers & ((XF < .5) | (YF > .325)))] = WALL                # the two towers are white, whatever the evening does to them
-cls[(Hh > 33) & (Hh < 60) & (S > .36) & (V > .55) & ~ground] = YELLOW
+cls[(Hh > 33) & (Hh < 60) & (S > .36) & (V > .45) & ~ground] = YELLOW
 cls[teal] = TEAL
 cls[veg] = FOL
 cls[veg & meadow & ground] = GRASS
@@ -121,6 +127,10 @@ noise = blur(np.random.RandomState(4).rand(WH, WW), 10); noise = (noise - noise.
 scaf = poly([(.116, .463), (.16, .4405), (.2105, .4505), (.2105, .536), (.12, .536)])
 ys, xs = np.nonzero(scaf)
 sx = ((.2125 + ((xs / WW - .116) % .03)) * WW).astype(int)
+cls[ys, xs] = cls[ys, sx]; Lo[ys, xs] = Lo[ys, sx]
+# what sticks out beside the high tower below the horizon: there the houses behind it go on, copied from further out
+ys, xs = np.nonzero(beside & (YF > HORIZON - .004) & (YF < .5))
+sx = np.clip(xs + np.where(xs / WW > .72, 1, -1) * int(.014 * WW), 0, WW - 1)
 cls[ys, xs] = cls[ys, sx]; Lo[ys, xs] = Lo[ys, sx]
 # the building site at its foot becomes lawn
 site = poly([(.034, .529), (.10, .5185), (.123, .5165), (.123, .535), (.205, .535), (.209, .521), (.2115, .535), (.172, .5415), (.171, .547), (.12, .5495), (.085, .5525), (.062, .5535), (.04, .5565), (.032, .547)]) | (scaf & (YF > along([(.116, .526), (.136, .531), (.2105, .524)], XF)))
