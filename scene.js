@@ -933,13 +933,20 @@ function resize() {
 }
 
 // ---------- seasons, day and night ----------
-// Every minute the picture is painted over with another one: first the weather turns, the
-// next time the season does.  Each season picks up its weathers where it left off, so over
-// the years all of them come round.
-let seasonClock = 0, steps = 0;
+// Every minute the picture is painted over with another one: another place, in another
+// season and weather.  Every place in every season and weather comes round once, in an
+// order of chance, before any of them comes again; the buttons and a click on the picture
+// go straight to the next one.  ?seed= makes the order the same every time.
+let seasonClock = 0;
+const ROLL = rng(qs.has('seed') ? parseInt(qs.get('seed'), 10) || 0 : (Math.random() * 4294967296) >>> 0);
+const sceneKey = (p, s, w) => p + '/' + s + '/' + w;
+const ALL_SCENES = [];
+for (let p = 0; p < places.length; p++) for (let s = 0; s < SEASONS.length; s++) for (const w of WEATHERS[SEASONS[s]]) ALL_SCENES.push({ p, s, w });
+const seen = new Set([sceneKey(placeIndex, seasonIndex, weather)]);   // what has been shown since the last round began
 function show(dur) {
   const season = SEASONS[seasonIndex], isNight = wantNight(), place = fit(places[placeIndex]);
   seasonClock = 0;
+  seen.add(sceneKey(placeIndex, seasonIndex, weather));
   announce();
   if (cur.place === place && cur.season === season && cur.weather === weather && cur.night === isNight) return;
   old = cur; cur = mkScene(place, season, weather, isNight);
@@ -959,8 +966,16 @@ function nextPlace() {
   show(4.5);
 }
 function nextScene() {
-  if (++steps % 2) nextWeather();
-  else { turn((seasonIndex + 1) % SEASONS.length, true); show(4.5); }
+  // Rather somewhere else in another season, then somewhere else at all, then anything not yet seen.
+  let left = ALL_SCENES.filter(c => !seen.has(sceneKey(c.p, c.s, c.w)));
+  if (!left.length) { seen.clear(); seen.add(sceneKey(placeIndex, seasonIndex, weather)); left = ALL_SCENES.filter(c => !seen.has(sceneKey(c.p, c.s, c.w))); }
+  const away = left.filter(c => c.p !== placeIndex || places.length < 2);
+  const apart = away.filter(c => c.s !== seasonIndex);
+  const next = pick(apart.length ? apart : away.length ? away : left, ROLL());
+  if (!next) return;
+  placeIndex = next.p; seasonIndex = next.s; weather = next.w;
+  weatherAt[next.s] = WEATHERS[SEASONS[next.s]].indexOf(next.w);
+  show(4.5);
 }
 retheme = () => show(1.8);
 paintCv.addEventListener('click', nextScene);
