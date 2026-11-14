@@ -165,10 +165,9 @@ cls[steps] = STEP; cls[pave] = PAVE; cls[road] = ROAD
 
 # Windows: what is a good deal darker than the wall round it, and of the size and shape of one.  By day that is
 # all there is to them.  At night some have a light on, and a lit window has four corners, which cells are bad at:
-# those of the house on the left are written down as shapes too, each with its upright sides and the lean of its
-# sill.  Those of the big house on the right the sun is on, and they are not dark at all, and those of the house
-# at the end of the street are small and behind a tree: they were measured by hand, clockwise from the upper left
-# corner.
+# those were measured by hand.  On the big house on the right and the one at the end of the street corner by
+# corner, clockwise from the upper left one.  On the house on the left, whose wall we look along from below, a
+# window is a slit with upright sides: left, right, then how high up its four corners are, clockwise again.
 BIG = [[.822, .060, .8485, .020, .855, .1365, .826, .158], [.761, .1525, .779, .130, .783, .2175, .764, .239], [.717, .038, .7345, .005, .7375, .0875, .720, .118],
        [.721, .205, .740, .180, .743, .267, .7245, .285], [.6875, .098, .7025, .068, .705, .145, .6895, .171], [.686, 0, .700, -.01, .7015, .040, .687, .062],
        [.6907, .2475, .7056, .228, .7077, .310, .6939, .324], [.6623, .032, .6736, .019, .6757, .0896, .6636, .113], [.6644, .1387, .6757, .1216, .6779, .193, .6657, .2133],
@@ -177,6 +176,11 @@ BIG = [[.822, .060, .8485, .020, .855, .1365, .826, .158], [.761, .1525, .779, .
        [.6977, .4093, .7114, .4008, .7148, .4861, .7003, .4936], [.6715, .4317, .6828, .4243, .6858, .5032, .6736, .5085], [.6388, .4563, .6459, .452, .6486, .5171, .6405, .5192],
        [.6666, .2856, .6785, .2717, .68, .34, .6678, .3539], [.6341, .324, .6437, .3133, .6448, .3827, .6348, .3933], [.7306, .5235, .7461, .5192, .7472, .566, .7312, .572]]
 BIG += [[a, c, b, c, b, e, a, e] for a, b, c, e in ((.3513, .362, .402, .4195), (.3919, .4025, .402, .4195), (.4372, .4468, .403, .417), (.3508, .362, .4387, .4637), (.3913, .4031, .4387, .4637), (.4367, .4479, .4429, .4632))]
+LEFT = [(.1972, .2099, .032, .069, .1384, .0958), (.2132, .2185, .0865, .101, .1637, .1477), (.2358, .2438, .0599, .0812, .1444, .1131), (.2505, .2578, .04, .064, .105, .0745),
+        (.2618, .2691, .08, .104, .152, .128), (.1952, .2095, .159, .1917, .2612, .228), (.2112, .2172, .2053, .2213, .2792, .2652), (.2345, .2425, .2665, .2865, .3417, .3211),
+        (.2345, .2431, .1644, .184, .2419, .2159), (.2558, .2598, .2372, .2492, .2998, .2852), (.1939, .2075, .2918, .3184, .3854, .3633), (.2105, .2168, .3264, .3417, .4002, .3908),
+        (.2311, .2398, .3734, .3908, .4424, .4296), (.2532, .2592, .4203, .4296, .4779, .4658), (.1809, .1956, .4457, .4658, .5207, .512), (.2043, .2117, .4712, .4792, .5113, .5046)]
+BIG += [[a, c, b, e, b, f, a, g] for a, b, c, e, f, g in LEFT]
 rnd = np.random.RandomState(7)
 WINDOWS = [q + [int(rnd.rand() < .42)] for q in BIG]                      # corner by corner, and whether it is lit
 around = ndi.grey_closing(Lf, size=(P(.05), P(.05)))
@@ -189,15 +193,6 @@ for i, sl in enumerate(ndi.find_objects(lab), 1):
     part = lab[sl] == i; area = part.sum()
     if area < P(.005) ** 2 or h > P(.11) or w > P(.05) or h < w * .6 or h > w * 8 or area < .4 * h * w: continue
     glass[sl] |= part
-    on = rnd.rand() < .4
-    if sl[1].start < P(.14) or sl[1].stop > P(.272): continue             # a balcony; one of those measured by hand, or small and far up the street
-    # Its sides are upright, its upper and lower edge run the same way: the way its middle runs, column by column.
-    cols = np.nonzero(part.any(0))[0]; top = part.argmax(0)[cols]; bot = h - part[::-1].argmax(0)[cols]
-    lean = np.polyfit(cols, (top + bot) / 2, 1)[0] if len(cols) >= 4 else 0
-    high = np.percentile(bot - top, 70); mid = np.median((top + bot) / 2 - lean * cols)
-    x0, x1 = sl[1].start, sl[1].stop; y0 = sl[0].start + mid - high / 2
-    if w > P(.02) or abs(lean) > 1.5: continue                            # not a window after all
-    WINDOWS.append([v / N for v in (x0, y0, x1, y0 + lean * w, x1, y0 + lean * w + high, x0, y0 + high)] + [int(on)])
 cls[glass] = GLASS
 cls[sky] = NONE
 
