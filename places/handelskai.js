@@ -43,8 +43,8 @@ const TRACKS = [.768, .8, .832, .866, .934, .988], GAUGE = .013;
 const EDGE = .745, BOX = .735, DECK = .787, WHEELS = .805, FENCE = 1.045, ROADV = 1.17, LANE = 1.3;
 const yardEdge = xf => EDGE + (vnoise(xf * 40, 7.7) - .5) * .01;
 
-const QUAY = [.577, .43], LOW = [.712, .17];                   // the wall along the water: its top, its end; the low one by the tracks: its line, its end
-const SHIP = [.458, .748, .566, .59, .47, .735, .545];         // the ship at the quay: hull from, to, its top, its foot; the decks from, to, their top
+const QUAY = [.577, .8], LOW = [.712, .17];                    // the wall along the water: its top, its end (in the tall trees); the low one by the tracks: its line, its end
+const SHIP = [.458, .748, .553, .58, .47, .735, .532];         // the ship at the quay, its waterline behind the wall: hull from, to, its top, its foot; the decks from, to, their top
 // where the bushes on the near bank begin: under the wall on the left, tall trees on the right
 const TOPS = [[-.05, .598], [.3, .598], [.4, .596], [.445, .588], [.6, .588], [.72, .582], [.755, .555], [.79, .515], [.84, .492], [.9, .488], [.95, .497], [1.05, .505]];
 const bushTop = xf => along2(TOPS, xf);
@@ -320,7 +320,7 @@ function shipStroke() {                                        // the river crui
     return;
   }
   const l = row ? U : (3 + R() * 6) * U, cx = row ? (cell + .5) * pitch : x, white = night ? mix(pal.hull, pal.dark, .45) : pal.hull;
-  PP.brush(cx - l, y, cx + l, y, row ? h * .15 : (1.4 + R()) * U, t < .07 ? mix(white, pal.dark, .45) : mix(white, pal.towerLight, R() * .3), o);
+  PP.brush(cx - l, y, cx + l, y, row ? h * .15 : (1.4 + R()) * U, t < .07 || y > py(QUAY[0]) - 2 * U ? mix(white, pal.dark, .45) : mix(white, pal.towerLight, R() * .3), o);   // dark along the roof, and where the hull goes down behind the wall
 }
 
 // ---------- walls, and what is sprayed on them ----------
