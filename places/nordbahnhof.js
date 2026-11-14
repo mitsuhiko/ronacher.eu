@@ -508,17 +508,36 @@ function coatStroke(x, y) {                                    // a broad stroke
   if (z === SKY || z === TOWER) return;
   veil(z === FAR ? .9 : z === LEAVES ? (folTree ? folOff : farOff(zx, zy)) : z === SLOPE ? slopeOff(zx, zy, .5) : flatOff(zy));
   if (z === FAR) PP.brush(x - l * .5, y, x + l * .5, y, .05 * PH, mix(pal.folMid, pal.haze, .2), o);
-  else if (z === LEAVES) {
-    const lum = clamp(folLum(x, y)), a = R() * Math.PI, fl = 16 * U, k = clamp(lum * 1.3);
-    PP.brush(x - Math.cos(a) * fl, y - Math.sin(a) * fl, x + Math.cos(a) * fl, y + Math.sin(a) * fl, (26 + R() * 14) * U,
-      folTree ? mix(pal.folDeep, lum > .5 ? pal.folMid : pal.folDark, k) : mix(pal.ivyDeep, lum > .5 ? pal.ivyMid : pal.ivyDark, k), o);
-  } else {
+  else if (z === LEAVES) leafCoat(x, y, folTree, 1, o);
+  else {
     let dx = l, dy = 0, col = mix(pal.grass, pal.grassDark, .4);
     if (z === PATH) { dx = (zx - VPX) * PW; dy = (zy - VPY) * PH; const q = l / (Math.hypot(dx, dy) || 1); dx *= q; dy *= q; col = pal.gravel; }
     else if (z === SLOPE) { dx = -l * .45; dy = l * .6; col = mix(pal.grass, zx > .6 ? pal.straw : pal.grassDark, .4); }
     o.jit = 4;
     PP.brush(x - dx, y - dy, x + dx, y + dy, (52 + R() * 12) * U, col, o);
   }
+}
+function leafCoat(x, y, tree, sz, o) {                        // a patch of leaves, in shade or in the light
+  const R = PP.R, lum = clamp(folLum(x, y)), a = R() * Math.PI, fl = 16 * sz * U, k = clamp(lum * 1.3);
+  PP.brush(x - Math.cos(a) * fl, y - Math.sin(a) * fl, x + Math.cos(a) * fl, y + Math.sin(a) * fl, (26 + R() * 14) * sz * U,
+    tree ? mix(pal.folDeep, lum > .5 ? pal.folMid : pal.folDark, k) : mix(pal.ivyDeep, lum > .5 ? pal.ivyMid : pal.ivyDark, k), o);
+}
+// The ivy and the bushes are one solid mass from a little below their tops down to the grass: SOLID is how little.
+// The tower's coat stops there, and theirs begins.
+const SOLID = .014, hedgeTop = x => py(bushTop(fx(x)) + SOLID), hedgeFoot = x => py(footAt(fx(x)));
+function hedgePath(c, whole) {                                 // that mass, or (whole) all there is above it
+  const a = Math.max(0, px(whole ? EAVE[0] : .07)) - 1, b = (whole ? Math.min(W, px(GUT[0])) : W) + 1, lap = whole ? 0 : 2 * U;
+  c.moveTo(a, whole ? -60 : hedgeFoot(a));
+  if (whole) c.lineTo(b, -60); else { for (let x = a + 3; x < b; x += 3) c.lineTo(x, hedgeFoot(x)); c.lineTo(b, hedgeFoot(b)); }
+  for (let x = b; x > a; x -= 3) c.lineTo(x, hedgeTop(x) - lap);
+  c.lineTo(a, hedgeTop(a) - lap); c.closePath();
+}
+function hedgeCoat(x, y) {                                     // the hedge's share of it: leaves all over, right up to that line
+  const top = hedgeTop(x), foot = hedgeFoot(x);
+  if (fx(x) < .07 || foot < top || y < top - 30 * U || y > foot + 30 * U) return;
+  y = clamp(y, top, foot);
+  fol(x, y, false); veil(farOff(fx(x), fy(y)));
+  for (let n = -1; n < 2; n++) leafCoat(x + n * 22 * U, y, false, 1.6, { a: .92, jit: 8, dry: 0, full: 1, sp: 2.2 * U, bow: .03 });
 }
 const faceY = (c, xf, front) => HOR + (c - HOR) * (front ? (VRX - xf) / (VRX - XC) : (xf - VLX) / (XC - VLX));
 function facePath(c, front) {
@@ -655,11 +674,18 @@ const place = {
     const c = PP.c;
     use(s);
     c.save(); c.beginPath(); c.rect(0, 0, W, H); place.sky(c, 8 * U); c.clip('evenodd');
-    for (let part = 0; part < 3; part++) {                     // the tower first, and none of it beyond its walls
+    // The tower first, and none of it beyond its walls.  Nor down where the hedge and the slope hide it: its strokes
+    // are long, and those of a later frame would lie on leaves and grass that are already there.
+    c.save(); c.beginPath(); hedgePath(c, true); c.clip();
+    for (let part = 0; part < 3; part++) {
       c.save(); c.beginPath(); if (part) facePath(c, part === 2); else towerPath(c); c.clip();
       for (let k = i; k < j; k++) towerCoat(cells[k].x, cells[k].y, part);
       c.restore();
     }
+    c.restore();
+    c.save(); c.beginPath(); hedgePath(c, false); c.clip();    // the hedge takes the tower's place there
+    for (let k = i; k < j; k++) hedgeCoat(cells[k].x, cells[k].y);
+    c.restore();
     for (let k = i; k < j; k++) if (cells[k].y > landTop - 20 * U) for (let n = -1; n < 2; n++) coatStroke(cells[k].x + n * 22 * U, cells[k].y + n * 14 * U);   // thrice over: nothing of the old picture is to show through, however narrow a strip
     PP.haze = null;
     c.restore();
