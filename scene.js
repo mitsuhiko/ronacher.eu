@@ -760,7 +760,9 @@ const WASH_ASKED = ['sky', 'ground'].includes(qs.get('wash')) ? qs.get('wash') :
 const OVERPAINT = qs.get('wash') !== 'always';
 function startCoat(dur, over) {
   const r = rng(17 + coatN), [ax, ay] = DIRS[coatN++ % DIRS.length], dl = Math.hypot(ax, ay);
-  const cw = 62 * U, ch = 38 * U, cells = [];
+  // Over a wash a hole in the coat shows the wash until the picture's own strokes fill it; over the old picture it
+  // shows the old picture, so an overpaint is brushed twice as close.
+  const dense = over ? Math.SQRT1_2 : 1, cw = 62 * U * dense, ch = 38 * U * dense, cells = [];
   let lo = 1e9, hi = -1e9;
   for (let y = -ch / 2; y < H + ch; y += ch) for (let x = -cw; x < W + cw; x += cw) {
     const c = { x: x + r() * cw * .65, y: y + r() * ch * .8 }; c.k = c.x * ax + c.y * ay;
