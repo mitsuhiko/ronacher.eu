@@ -685,6 +685,15 @@ function skyStreak() {
   else if (k < .42) col = mix(col, pal.skyLight, .5);
   else if (y > HZ * .78 && k < .6) { col = mix(col, pal.skyWarm, .7); w = (3 + R() * 6) * U; sa *= .2; }
   if (glow) col = mix(col, orb.glow, glow);
+  const [back, on, ww] = clearRun(s, x, y, ca, sa, w);
+  PP.brush(x - ca * back, y - sa * back, x + ca * on, y + sa * on, ww, col, { a, jit: 7, dry: .32, dash, bow: .06 });
+}
+
+// The sky is painted behind whatever stands in front of it (a tree, a tower), so a stroke of the sky has to keep
+// off it all along, not only where it is put down: the paint would go over the leaves and stay there until the
+// place paints them again, which it does at a slower pace than the sky is painted.
+// A stroke from x - ca, y - sa to x + ca, y + sa, w wide: how far back and on it may go, and how wide it may be.
+function clearRun(s, x, y, ca, sa, w) {
   let back = 1, on = 1;
   if (place.front) {                                           // something stands in front of the sky: stop there
     const len = Math.hypot(ca, sa) || 1, n = Math.ceil(len / (3 * U)), ox = -sa / len * w / 2, oy = ca / len * w / 2;
@@ -692,7 +701,22 @@ function skyStreak() {
     for (let i = 1; i <= n && back === 1; i++) if (place.front(s, x - ca * i / n, y - sa * i / n)) back = (i - 1) / n;
     if (on < 1 || back < 1 || place.front(s, x + ox, y + oy) || place.front(s, x - ox, y - oy)) w = Math.min(w, 5 * U);
   }
-  PP.brush(x - ca * back, y - sa * back, x + ca * on, y + sa * on, w, col, { a, jit: 7, dry: .32, dash, bow: .06 });
+  return [back, on, w];
+}
+// A dab at x, y reaching rx, ry (its grain included): the share of that size it may have to keep clear of what
+// stands in front, looked at round its rim and on a ring halfway in (so that a twig between two on the rim is
+// caught), for the full size and then smaller ones; 0 if none fits.  (Whether x, y itself is free is for the caller to know.)
+const RIM = [];
+for (let i = 0; i < 16; i++) RIM.push([Math.cos(i * TAU / 16), Math.sin(i * TAU / 16)]);
+for (let i = 0; i < 8; i++) RIM.push([Math.cos((i + .5) * TAU / 8) * .5, Math.sin((i + .5) * TAU / 8) * .5]);
+function dabRoom(s, x, y, rx, ry) {
+  if (!place.front) return 1;
+  for (let k = 1; k > .2; k *= .55) {
+    let clear = true;
+    for (let i = 0; i < RIM.length && clear; i++) if (place.front(s, x + RIM[i][0] * rx * k, y + RIM[i][1] * ry * k)) clear = false;
+    if (clear) return k;
+  }
+  return 0;
 }
 
 // one dab of cloud, wherever a cloud is (now)
@@ -707,21 +731,25 @@ function cloudDab() {
   const d = cloudD(c, x, y), v = cdV;
   if (d < -.1) return;
   const lx = x - c.x, ly = y - c.base, big = Math.min(1.5, .6 + c.h / (220 * U));
+  const dab = (r, col, o) => {                                 // no bigger than what stands in front leaves room for
+    const g = .4 + .55 * (o.s ?? 2.4 * U), k = dabRoom(s, x, y, r * (o.sx ?? 1) + g, r * (o.sy ?? 1) + g);
+    if (k) PP.dab(x, y, r * k, col, o);
+  };
   if (d < .22) {                                               // the ragged rim is only grain, no body
-    PP.dab(x, y, (4 + R() * 9) * U, pal.cloud, { a: .88, den: .2 + d * 1.3, s: 4.2 * U, sx: 1.5, sy: .75 });
+    dab((4 + R() * 9) * U, pal.cloud, { a: .88, den: .2 + d * 1.3, s: 4.2 * U, sx: 1.5, sy: .75 });
     return;
   }
   // tone: the underside of every billow and the flat base sit in shade
   let sh = clamp(v * .6 + .15) * .55 + smooth(-.4 * c.h - 20 * U, -4 * U, ly) * .8;
   sh = clamp(sh * (.35 + 1.5 * fbm(lx * .012 / U + 3, ly * .025 / U + c.ns)) - .12);
   const k = R();
-  if (k < .06) { PP.dab(x, y, (5 + R() * 8) * U, skyCol(y), { a: .45, den: .14, s: 3 * U }); return; }   // sky peeping through
+  if (k < .06) { dab((5 + R() * 8) * U, skyCol(y), { a: .45, den: .14, s: 3 * U }); return; }   // sky peeping through
   if (sh > .42 && k < .55) {
-    const l = (10 + R() * 28) * U;
-    PP.brush(x - l, y + l * .14, x + l, y - l * .14, (4 + R() * 9) * U, mix(pal.cloud, R() < .5 ? pal.cloudShade : pal.cloudDeep, sh * .95), { a: .6, dry: .3, dash: 12 * U, jit: 6 });
+    const l = (10 + R() * 28) * U, [back, on, w] = clearRun(s, x, y, l, -l * .14, (4 + R() * 9) * U);
+    PP.brush(x - l * back, y + l * .14 * back, x + l * on, y - l * .14 * on, w, mix(pal.cloud, R() < .5 ? pal.cloudShade : pal.cloudDeep, sh * .95), { a: .6, dry: .3, dash: 12 * U, jit: 6 });
   } else {
     const col = sh < .12 ? pal.cloud : mix(pal.cloud, pal.cloudShade, sh * .8);
-    PP.dab(x, y, (5 + R() * 11 * big) * U, col, { a: .9, den: .55, s: 3.2 * U, core: .3, sx: 1.25, sy: .85, jit: 5 });
+    dab((5 + R() * 11 * big) * U, col, { a: .9, den: .55, s: 3.2 * U, core: .3, sx: 1.25, sy: .85, jit: 5 });
   }
 }
 
