@@ -10,33 +10,39 @@
  *
  *  It is painted after a photograph taken in May, measured by hand:
  *  the saint part by part, the fence bay by bay, the wall, the bench.
+ *  What is green in it is as light and as dark as the photograph has
+ *  it, point by point: that is read off it (waldbachsteig-map.js).
  *  The cable that crossed its sky is not in it, nor what is cut into
- *  the pedestal.  The lantern is made up, and so is what lies beyond
- *  the photograph: more of the wall and the trees on the left, the
- *  meadow, the path and the fruit trees under the hill on the right,
- *  the near end of the bench and the path at our feet.  It is an
- *  upright one: a wide screen keeps the saint on its left.
+ *  the pedestal, nor what there is of the fence and the wall beyond the
+ *  gate: a bush has grown up in front of that.  The lantern is made up,
+ *  and so is what lies beyond the photograph: more trees and bushes on
+ *  the left, where the wall has its corner, bush beside bush under the
+ *  hill on the right, the near end of the bench and the path at our
+ *  feet.  There the leaves are those of the photograph once more, in a
+ *  mirror.  It is an upright one: a wide screen has it in its middle.
  *  scene.js paints the sky and says what a place has to bring along.
  * ------------------------------------------------------------------ */
 (window.viennaPlaces = window.viennaPlaces || []).push({ id: 'waldbachsteig', name: 'Waldbachsteig', make(kit) {
 'use strict';
 const { PP, TAU, clamp, smooth, ease, mix, pick, rng, hash1, vnoise, fbm, wind, spend } = kit;
+const MAP = window.viennaMaps.waldbachsteig;
 
 // ---------- what the brush is looking at ----------
 let W = 0, H = 0, U = 1, time = 0, sway = 0;   // the view (CSS pixels, the stroke unit), the clock and how far the wind pushes the leaves
 let PW = 1, PH = 1;                         // the photo's width and height in pixels
-let cur = null, own = null, pal = null, traits = null, night = false, season = '', bare = false, wet = false, evening = false, white = 0, thin = 0;   // own: the picture's colours, pal: those at the point being painted
+let cur = null, own = null, pal = null, traits = null, night = false, season = '', bare = false, wet = false, evening = false, white = 0, thin = 0, sun = 1;   // own: the picture's colours, pal: those at the point being painted; sun: how hard the shadows are
 const use = s => {
   cur = s; own = pal = s.pal; traits = s.traits; night = s.night; season = s.season; bare = traits.bare; wet = traits.rain > 0; evening = s.weather === 'golden';
   white = traits.snow ? 1 : season !== 'winter' ? 0 : s.weather === 'sunny' ? .7 : s.weather === 'frost' ? .45 : .3;   // how much snow lies
   thin = season === 'autumn' ? .34 : season === 'spring' ? .14 : 0;   // how thin the leaves are on the trees
+  sun = night ? .45 : traits.shadow > 0 ? (bare ? .6 : 1) : .25;
   return s;
 };
 const at = (x, y) => { const s = kit.at(x, y, place); return s && use(s); };   // the picture at a point, if it is one of this place
 
 // ---------- geometry ----------
 // Everything is measured on the photograph: x and y as fractions of its width and height.  It is an upright one:
-// a narrow screen shows a slice of its width, a wide one a slice of its height and what lies to its right.
+// a narrow screen shows a slice of its width, a wide one a slice of its height and what lies to either side of it.
 let X0 = 0, Y0 = 0;
 const px = f => (f - X0) * PW, py = f => (f - Y0) * PH, fx = x => X0 + x / PW, fy = y => Y0 + y / PH;
 function along2(pts, x) {                                      // a line through points, eased from one to the next
@@ -50,10 +56,44 @@ function ramp(list, t) {                                       // a colour on a 
   return mix(list[i], list[i + 1], f - i);
 }
 const shadow = (x, y) => traits.shadow && !night ? traits.shadow * smooth(.5, .7, fbm((x + time * 14 * U) * .0018 / U, y * .005 / U + 40)) : 0;
-function folLum(x, y) {                                        // light falls in from the upper left
-  const s = time * .03, k = .02 / U;
-  return .45 + (fbm(x * k + s, y * k * 1.2) - fbm((x - 9 * U) * k + s, (y - 9 * U) * k * 1.2)) * 3.2;
+// ---------- the map ----------
+// What grows at every point of the photograph, and how light it is there, was read off it (tools/waldbachsteig-map.py):
+// one character a cell, what it is times eight plus how light it is, from 0 to 7.  For a wisp of leaves that is how
+// much of the cell they fill.  Where things begin and end is measured, further down; from the map comes the light in
+// all that is green, and the walnut, leaf by leaf.
+const M_SKY = 0, M_LEAF = 1, M_WISP = 2, M_GRASS = 5;
+const MW = MAP.w, MH = MAP.h, cells = new Uint8Array(MW * MH);
+{ const code = new Uint8Array(128);
+  for (let c = 35, v = 0; c < 127; c++) if (c !== 92) code[c] = v++;
+  for (let i = 0; i < cells.length; i++) cells[i] = code[MAP.cells.charCodeAt(i)]; }
+// Beyond the photograph it goes on as its own mirror image, drawn out and pulled out of shape so that it does not show.
+function fold(xf, pf) {
+  const d = xf < 0 ? -xf : xf - 1;
+  let m = d * .75 + smooth(0, .25, d) * (vnoise(xf * 1.7 + 7.3, pf * 2.5) - .5) * .11;   // never so much that it would turn back
+  if (m < 0) m = -m;
+  m %= 2; if (m > 1) m = 2 - m;
+  return xf < 0 ? m : 1 - m;
 }
+let lev = 0, mxf = 0;                                           // what what() learnt on the way: how light it is, and where on the photograph the point lies
+function what(xf, pf) {                                        // what there is at a point
+  const a = xf * MW * .8, b = pf * MH * .8;                    // a cell has no corners
+  xf += (vnoise(a, b) - .5) * 1.5 / MW; pf += (vnoise(a + 31.7, b + 17.3) - .5) * 1.5 / MH;
+  if (xf < 0 || xf > 1) xf = fold(xf, pf);
+  if (pf > 1) pf = 2 - pf;                                     // and below it, at our feet
+  mxf = xf;
+  const i = xf * MW | 0, j = pf * MH | 0, v = cells[(j < 0 ? 0 : j >= MH ? MH - 1 : j) * MW + (i >= MW ? MW - 1 : i)];
+  lev = v & 7; return v >> 3;
+}
+function light(xf, pf) {                                       // how light what grows at a point is, from 0 to 7
+  const k = what(xf, pf);
+  return k === M_SKY ? 2 + vnoise(xf * 40, pf * 50) * 4 : k === M_WISP ? 6 : lev;   // where the photograph has sky and the picture has not: neither light nor dark
+}
+// The bushes stand where the photograph has the wall, the bench, the grass: they are as light as the hedge is, further
+// up, where its leaves are thickest, and that over and over, each time the other way up.
+function bushLight(xf, pf) { let t = ((pf - .5) / .21) % 2; if (t < 0) t += 2; return light(xf + pf * .37, .39 + (t > 1 ? 2 - t : t) * .21); }
+const tone = l => clamp(.5 + ((l + .1 + PP.R() * .8) / 8 - .5) * (.7 + .5 * sun));   // without the sun there is less to tell light from shade
+const leafHere = (x, y) => vnoise(x * .13 / U, y * .13 / U) < .32 + lev * .06;   // a wisp of leaves is leaves here and sky there
+const CROWN = [[0, .5], [.33, .5], [.36, .455], [.4, .435], [.46, .43], [.5, .4], [.56, .36], [.6, .3]];   // how far to the right the walnut reaches at a height
 
 // The wall runs away from us to the right, and the fence on it: whatever is level along them runs to a point far
 // off on that side (VX), the wall's a little lower (WV) than the fence's (FV).  A thing there is as big as far()
@@ -62,8 +102,7 @@ const VX = 2.09, WV = .7, FV = .655;
 const far = xf => (VX - xf) / VX;
 const BACK = .8, EDGE = .845, DRIP = .865, FOOT = 1.04;        // the coping: where it begins, its front edge, its underside; the foot of the wall
 const wallY = (k, xf) => WV + (k - WV) * far(xf);
-const WEND = .895, GATE = .925, END = 1.034;                   // where the wall ends at the steps, where it goes on beyond them, and where it ends for good
-const walled = xf => xf < WEND || (xf > GATE && xf < END);
+const WEND = .895, WBEG = -.16;                                // where the wall ends, at the gate, and where it begins: its corner lies a little beyond the photograph
 // The fence: its upper and its lower rail, and where its posts stand.  They are evenly spaced, which is how this counts them.
 const RAIL0 = .68, RAIL1 = .782;
 const postX = n => (.2113 * n + .075) / (.1013 * n + 1), bayOf = xf => (xf - .075) / (.2113 - .1013 * xf);
@@ -71,21 +110,21 @@ const ironY = (v, xf, deep) => FV + (RAIL0 - FV + (deep && v > 0 ? v * 1.4 : v) 
 
 // The lie of the land: the ridge of the hill, the top of the hedge, of what grows in the bed, of the grass in front.
 const RIDGE = [[-3, .41], [-.5, .408], [0, .405], [.3, .4], [.44, .39], [.47, .379], [.5, .369], [.55, .361], [.6, .355], [.7, .343], [.8, .33], [.9, .325], [1, .328],
-  [1.15, .322], [1.4, .345], [1.7, .392], [1.95, .405], [2.3, .378], [2.7, .36], [3.1, .385], [3.6, .4]];
+  [1.15, .322], [1.4, .335], [1.7, .365], [1.95, .38], [2.3, .36], [2.7, .35], [3.1, .37], [3.6, .385]];
 const hillTop = xf => along2(RIDGE, xf) + (vnoise(xf * 70, 2.2) - .5) * .008 + (vnoise(xf * 230, 6.1) - .5) * .004;
 const BUSHES = [[-3, .62], [.3, .6], [.36, .5], [.42, .46], [.5, .45], [.53, .44], [.57, .43], [.62, .405], [.67, .385], [.75, .375], [.8, .36], [.84, .343], [.87, .35], [.9, .365], [1, .365],
-  [1.1, .385], [1.2, .43], [1.3, .5], [1.4, .575], [1.47, .612], [4, .612]];
+  [1.1, .385], [1.25, .43], [1.45, .415], [1.7, .45], [1.95, .425], [2.3, .455], [4, .44]];
 const hedgeTop = xf => along2(BUSHES, xf) + (vnoise(xf * 13, 4.4) - .5) * .045 * smooth(.9, 1.1, xf) + (vnoise(xf * 45, 4.4) - .5) * .03 + (vnoise(xf * 160, 8.3) - .5) * .012;
 const BEDTOP = [[-3, .6], [0, .6], [.1, .605], [.2, .59], [.3, .575], [.36, .555], [.42, .565], [.447, .6], [.456, .648], [.54, .652], [.56, .64], [.6, .632], [.7, .625], [.8, .63], [.9, .635], [1.04, .64]];
 const reeds = xf => smooth(.27, .33, xf) * smooth(.455, .43, xf);                   // the long grass by the pedestal
 const bedTop = xf => along2(BEDTOP, xf) + (vnoise(xf * 60, 1.7) - .5) * .02 + (vnoise(xf * 210, 3.3) - .5) * .012 - reeds(xf) * .04 * vnoise(xf * 420, 5.5);
 function grassTop(xf) {                                        // long grass at the foot of the wall, the meadow beyond it
-  if (xf > END) return .64 + (vnoise(xf * 30, 6.6) - .5) * .012;
-  if (xf > WEND) return (xf > GATE ? .8 : .775) + (vnoise(xf * 90, 2.9) - .5) * .028;
-  return wallY(FOOT, xf) - .008 - (.015 + .07 * smooth(.26, .42, xf)) * (.35 + .65 * vnoise(xf * 14, 7.7)) - .014 * vnoise(xf * 150, 1.1);
+  const wild = .815 + (vnoise(xf * 6, 9.1) - .5) * .03 + (vnoise(xf * 90, 2.9) - .5) * .022;   // beyond the wall, at the foot of the bushes
+  if (xf > WEND + .015) return wild;
+  const foot = wallY(FOOT, xf) - .008 - (.015 + .07 * smooth(.26, .42, xf)) * (.35 + .65 * vnoise(xf * 14, 7.7)) - .014 * vnoise(xf * 150, 1.1);
+  return foot + (wild - foot) * smooth(WEND, WEND + .015, xf);
 }
 const NEAR = 1.14;                                             // from here down it is the path we stand on
-const pathX = pf => 1.33 + (1 - pf) * 1.35 + .05 * Math.sin(pf * 14), pathW = pf => .012 + Math.max(0, pf - .64) * .28;   // the path: where it runs at a height, half its width
 
 // ---------- the trees ----------
 // A crown is a heap of rounds: [x, y, half as wide, half as high].  The walnut's are measured, and so are the
@@ -93,7 +132,6 @@ const pathX = pf => 1.33 + (1 - pf) * 1.35 + .05 * Math.sin(pf * 14), pathW = pf
 // winter, and where the leaves are thin, the trees are grown: a trunk, limbs, twigs, none of them beyond the crown.
 const WALNUT = [[.09, .21, .14, .15], [.3, .27, .17, .135], [.42, .24, .075, .09], [.38, .4, .09, .08], [.22, .46, .2, .13], [.05, .5, .15, .14], [-.05, .1, .12, .12], [-.2, .22, .2, .2], [-.25, .46, .2, .16]];
 const GAPS = [[.1, .32, .1, .055], [.17, .365, .05, .025], [.245, .155, .035, .028]];
-const ORCHARD = [[1.47, 1], [1.62, .7], [2.12, 1.1], [2.5, .8], [2.62, 1], [3.05, .9]];   // fruit trees at the foot of the hill: [x, how big]
 let rounds = [], crown = null, cCols = 0, cRows = 0, cCell = 2, cFoot = 0;
 let limbs = [], limbSum = null, limbWeight = 0, limbLength = 0, mask = null;
 const limbX = (s, t) => (1 - t) * (1 - t) * s.x1 + 2 * t * (1 - t) * s.cx + t * t * s.x2;
@@ -108,11 +146,10 @@ function buildTrees() {
   rounds = [];
   const tree = (t, list) => { if (t[0] > x0 && t[0] < x1) { trees.push(t); for (const b of list) rounds.push(b); } };   // [x, foot, top, how wide it spreads, how it leans, how thick]
   tree([.085, .7, .05, 1.15, .1, .02], WALNUT);
-  for (let i = 1, x = -.66; x > x0; i++, x -= .5 + hash1(i * 13) * .25) {             // more of them beyond the photograph
-    const k = .8 + hash1(i * 7) * .4;
-    tree([x, .7, .3 - .2 * k, 1, 0, .016], [[x + .02, .3, .26 * k, .2 * k], [x - .2 * k, .46, .2 * k, .15], [x + .2 * k, .45, .16 * k, .13]]);
+  for (const side of [0, 1]) {                                 // beyond the photograph the map is its own mirror image: there it stands again, the other way round
+    const m = xf => side ? 1 + (1 - xf) / .75 : -xf / .75;
+    tree([m(.085), .7, .05, 1.15, -.1, .02], WALNUT.map(b => [m(b[0]), b[1], b[2] / .75, b[3]]));
   }
-  for (const [x, k] of ORCHARD) tree([x, .652, .652 - .105 * k, .9, 0, .013], [[x, .652 - .06 * k, .05 * k, .042 * k], [x - .028 * k, .652 - .045 * k, .034 * k, .03 * k], [x + .03 * k, .652 - .05 * k, .034 * k, .03 * k]]);
   // the leaves: how deep in them a point is
   cCell = 2 * U; cFoot = Math.min(H, py(.7)); cCols = Math.ceil(W / cCell) + 2; cRows = Math.max(1, Math.ceil(cFoot / cCell) + 1);
   crown = new Float32Array(cCols * cRows);
@@ -126,7 +163,7 @@ function buildTrees() {
   // their wood
   limbs = [];
   let r = rng(5);
-  const leafy = (x, y) => { const pf = fy(y); return pf < .7 && body(fx(x), pf) > .03; };
+  const leafy = (x, y) => { const pf = fy(y), k = pf < .7 ? what(fx(x), pf) : M_SKY; return (k === M_LEAF || k === M_WISP) && mxf < along2(CROWN, pf); };   // no limb beyond the leaves
   const add = (xa, ya, xb, yb, bend, w, depth) => {
     const len = Math.hypot(xb - xa, yb - ya), a = Math.atan2(yb - ya, xb - xa);
     limbs.push({ x1: xa, y1: ya, x2: xb, y2: yb, cx: (xa + xb) / 2 - Math.sin(a) * len * bend * 2, cy: (ya + yb) / 2 + Math.cos(a) * len * bend * 2, w, depth, len });
@@ -157,6 +194,44 @@ function buildTrees() {
 }
 const folAt = (x, y) => { const i = ((x - sway) / cCell) | 0, j = (y / cCell) | 0; return i < 0 || j < 0 || i >= cCols || j >= cRows ? -9 : crown[j * cCols + i]; };
 const maskAt = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : mask.of[((y / mask.cell) | 0) * mask.cols + ((x / mask.cell) | 0)];
+
+// ---------- the bushes ----------
+// Where the wall ends, at the gate, a bush has grown up in front of the fence and hides what there is left of it,
+// another one stands before its corner on the left, and beyond the photograph there is bush beside bush: those on
+// the left are closer to us, and bigger.  Each is a heap of rounds like a crown; how deep in one a point is, ragged
+// edge and all, is kept in a coarse grid.
+const BUSH = [[1.035, .665, .115, .135], [.965, .78, .07, .055], [1.1, .6, .09, .1], [-.3, .77, .19, .2], [-.2, .64, .1, .1], [-.21, .98, .14, .15], [-.42, .97, .17, .18]];
+let shrubs = [], shrub = null, sCols = 0, sRows = 0, sCell = 2;
+let stop = 0;                                                  // what inBush() learnt on the way: the top of the round the point is in
+function inBush(xf, pf) {                                      // how deep in a bush: 1 in the middle of a round, 0 at its edge
+  let q = -9;
+  for (const b of shrubs) {
+    const dx = (xf - b[0]) / b[2]; if (dx > 1.3 || dx < -1.3) continue;
+    const dy = (pf - b[1]) / b[3], d = 1 - Math.hypot(dx, dy);
+    if (d > q) { q = d; stop = b[1] - b[3]; }
+  }
+  return q;
+}
+function buildBushes() {
+  shrubs = BUSH.slice();
+  for (let i = 1, x = 1.2, x1 = fx(W) + .3; x < x1; i++, x += .1 + hash1(i * 17) * .09) {   // a big round and a smaller one on its shoulder, and what grows at its foot
+    const k = .75 + hash1(i * 5) * .6, y = .71 - .07 * k + (hash1(i * 29) - .5) * .03, side = hash1(i * 11) < .5 ? -1 : 1;
+    shrubs.push([x, y, .12 * k, .14 * k], [x + side * .07 * k, y - .07 * k, .07 * k, .08 * k], [x + (hash1(i * 3) - .5) * .1, .79, .13, .055]);
+  }
+  for (let i = 1, x = -.58, x0 = fx(0) - .4; x > x0; i++, x -= .16 + hash1(i * 19) * .12) {
+    const k = 1.1 + hash1(i * 7) * .5, y = .86 - .04 * k + (hash1(i * 31) - .5) * .04, side = hash1(i * 13) < .5 ? -1 : 1;
+    shrubs.push([x, y, .15 * k, .15 * k], [x + side * .09 * k, y - .08 * k, .09 * k, .08 * k], [x + (hash1(i * 3) - .5) * .1, 1.02, .2, .16]);
+  }
+  sCell = 2 * U; sCols = Math.ceil(W / sCell) + 1; sRows = Math.ceil(H / sCell) + 1;
+  shrub = new Float32Array(sCols * sRows).fill(-9);
+  for (let i = 0; i < sCols; i++) {
+    const xf = fx((i + .5) * sCell);
+    if (xf > -.04 && xf < .86) continue;                       // none of them in the photograph, but the one at the gate
+    for (let j = 0; j < sRows; j++) { const pf = fy((j + .5) * sCell), q = inBush(xf, pf);
+    if (q > -.3) shrub[j * sCols + i] = q + (fbm(xf * 9 + 1, pf * 12) - .5) * .22 + (vnoise(xf * 60, pf * 80) - .5) * .1; }
+  }
+}
+const bushAt = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? -9 : shrub[((y / sCell) | 0) * sCols + ((x / sCell) | 0)];
 
 // ---------- what is drawn by hand ----------
 // The saint, the lantern, the fence and the bench are kept in a grid: which part of which of them a cell belongs
@@ -268,12 +343,11 @@ function buildIron() {
     if (pts.length === 1) stamp(parts, id, pts[0][0], pts[0][1], w * .5);
     for (let i = 1; i < pts.length; i++) stampLine(parts, id, pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1], rad);
   };
-  const n0 = Math.max(-9, Math.floor(bayOf(Math.max(-3.5, fx(0)))) - 1);
-  for (let n = n0; n <= 9; n++) {
+  for (let n = -1; n <= 7; n++) {                            // from the corner to the gate, and a bay more, for what shows at the edge of the bush
     const gate = n === 6, big = n === 3 || n === 6 || n === 7 || n === 9, xp = postX(n), k = far(xp) * PH / 1100, thick = b => Math.max(.85 * U, b * k);
     const pt = (u, v, deep) => { const xf = postX(n + u); return [px(xf), py(ironY(v, xf, deep))]; };
     const odd = (j, i) => hash1((n + 20) * 131 + j * 17 + i) - .5, sag = (i, v) => (hash1((n * 3 + i + 90) * 7 + v * 40) - .5) * .028;   // how far a piece is off, how far a rail where two lengths of it meet
-    if (n < 9) BAY.forEach(([pts, w, mark, what], j) => {
+    BAY.forEach(([pts, w, mark, what], j) => {
       const a = pts[0], last = pts.length - 1, s = 1 + odd(j, 1) * .12, du = odd(j, 2) * .02, dv = odd(j, 3) * .035;
       add(pts.map((q, i) => what === SCROLL ? pt(a[0] + (q[0] - a[0]) * s + du * i / last, a[1] + (q[1] - a[1]) * s + dv * i / last, gate)
         : what === RAIL ? pt(q[0], q[1] + sag(Math.round(q[0] * 3), q[1]), gate) : pt(q[0], q[1], gate)), thick(w * (what === SCROLL ? 1 + odd(j, 4) * .3 : 1)), IRON, mark, what);
@@ -329,14 +403,17 @@ function buildThings() {
 // ---------- whose a point is ----------
 // Every point of the picture belongs to one thing, the nearest that covers it, and only that thing's strokes may
 // start there.  Where the land begins is kept column by column.
-const SKY = 0, HILL = 1, HEDGE = 2, LEAVES = 3, LIMB = 4, BEDS = 5, STATUE = 6, FENCE = 7, WALL = 8, GRASS = 9, PATH = 10, LANTERN = 11, BENCH = 12;
+const SKY = 0, HILL = 1, HEDGE = 2, LEAVES = 3, LIMB = 4, BEDS = 5, STATUE = 6, FENCE = 7, WALL = 8, GRASS = 9, PATH = 10, LANTERN = 11, BENCH = 12, SHRUB = 13;
 let ridgeY = null, hedgeY = null, bedY = null, grassY = null, coping = null, nCol = 0;
-let zx = 0, zy = 0, zp = 0, zf = 0;                            // what zone() learnt on the way: the point on the photo, the part of what is drawn by hand, how deep in the leaves
+let zx = 0, zy = 0, zp = 0, zf = 0;                            // what zone() learnt on the way: the point on the photo, the part of what is drawn by hand, what kind of leaves the map has there
 const col = x => x < 0 ? 0 : x >= nCol ? nCol - 1 : x | 0;
 function treeAt(x, y) {                                        // leaves, a limb, or neither
   if (y >= cFoot) return 0;
-  const v = zf = folAt(x, y);
-  if (!bare && v > thin) return LEAVES;
+  const v = folAt(x, y);
+  if (!bare && v > -8) {                                       // the map has it leaf by leaf; in spring and in autumn there are fewer of them
+    const k = what(zx, zy);
+    if (mxf < along2(CROWN, zy) && (k === M_LEAF ? !thin || lev > 1 || vnoise(x * .2 / U, y * .2 / U) > thin * 1.3 : k === M_WISP && leafHere(x, y))) { zf = k; return LEAVES; }
+  }
   return maskAt(x, y) & (bare || v < -8 ? 1 : 4) ? LIMB : 0;    // among leaves the twigs are not to be seen
 }
 // While it is in leaf the bed grows through the fence: here and there something stands in front of it, the more the nearer its foot.
@@ -346,7 +423,8 @@ function zone(x, y) {
   let g = zp = partAt(x, y);
   zx = fx(x); zy = fy(y);
   if (g >= SLAT) return BENCH;
-  if (y > grassY[i]) return (zx > 1.05 && Math.abs(zx - pathX(zy)) < pathW(zy)) || (zy > 1.1 && zy > NEAR + (vnoise(zx * 20, 3.3) - .5) * .03) ? PATH : GRASS;
+  if (y > grassY[i]) return zy > 1.1 && zy > NEAR + (vnoise(zx * 20, 3.3) - .5) * .03 ? PATH : GRASS;
+  if (bushAt(x, y) > 0) { zp = 0; return SHRUB; }
   if (g >= LID) return LANTERN;
   if (g === IRON) { if (bare || y > coping[i] || !grown(zx, zy)) return FENCE; g = zp = 0; }
   if (y > coping[i]) return WALL;
@@ -415,7 +493,7 @@ function hillStroke(x, y) {
     return;
   }
   // crown beside crown, each light on top and dark underneath
-  let c = green(clamp(.2 + vnoise(xf * 110, pf * 150 + 3) * .65 + (fbm(xf * 9 + 1, pf * 14) - .5) * .5 + (R() - .5) * .2));
+  let c = green(clamp(.2 + light(xf, pf) / 7 * .55 + (R() - .5) * .2));
   if (pal.accent && k > (season === 'spring' ? .985 : .92)) c = pick(pal.accent, R());   // a wild cherry in flower here and there
   const sd = shadow(x, y); if (sd) c = mix(c, pal.folDark, sd * .4);
   PP.dab(x, y, by ? 1.3 * sz : (1.8 + R() * 2.6) * sz, mix(c, pal.haze, .3), { a: .88, den: by ? 1.2 : .8, core: .6, s: by ? U : 1.5 * U, sx: 1.2, sy: .85 });
@@ -428,42 +506,31 @@ function thicket(x, y, top, behind) {                          // bare twigs, an
   const a = -Math.PI / 2 + (R() - .5) * (q < .72 ? .5 : 2.2), l = Math.min((6 + R() * 14) * U, (y - top) * 1.2 + 5 * U), ca = Math.cos(a) * l, sa = Math.sin(a) * l;
   PP.line([[x, y], [x + ca * .5 + (R() - .5) * 3 * U, y + sa * .5], [x + ca, y + sa]], ramp(pal.twigs, R() * .75 + (1 - depth) * .2), (.8 + R() * 1.2) * U, { pass: 1, a: .8 });
 }
-function hedgeStroke(x, y) {
-  const R = PP.R, xf = zx, pf = zy, top = hedgeY[col(x)], k = R(), sz = .85 * U;
-  let ex = 9 * U, ey = ex;                                     // how far the stroke reaches: the fence wants to know
-  veil(.5);
-  if (bare) thicket(x, y, top, mix(mix(pal.twigs[2], pal.haze, .5), white ? pal.snow : pal.meadow[2], .3));
-  else {
-    // it is dark under the bushes, and darkest behind the saint
-    const lum = clamp(folLum(x, y) + .12 - smooth(.5, .64, pf) * .4 - .32 * smooth(.36, .42, xf) * smooth(.58, .53, xf));
-    if (y - top < .006 * PH) PP.dab(x, y, (2.5 + R() * 4) * sz, lum > .45 ? pal.folLight : pal.folMid, { a: .85, den: .35, s: 2.2 * U });   // the ragged rim: single leaves
-    else if (pal.bloom && lum > .4 && k > (season === 'spring' ? .88 : .965)) PP.dab(x, y, (1.6 + R() * 1.6) * sz, pal.bloom, { a: .9, den: 1.2, core: .7, s: 1.2 * U, jit: 4 });   // it flowers in May
-    else {
-      let c = green(lum);
-      if (pal.accent && season === 'autumn' && lum > .3 && k > .9) c = pick(pal.accent, R());
-      const sd = shadow(x, y); if (sd) c = mix(c, pal.folDeep, sd * .4);
-      const a = R() * Math.PI, l = (3 + R() * 6) * sz, wd = (3 + R() * 4.5) * sz;
-      ex = Math.abs(Math.cos(a)) * l + wd * .6; ey = Math.abs(Math.sin(a)) * l + wd * .6;
-      if (byFigure(x, y, l)) PP.dab(x + ax * 1.2 * U, y + ay * 1.2 * U, 1.3 * sz, c, { a: .9, den: 1.3, core: .7, s: U, jit: 8 });
-      else PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, wd, c, { a: .86, sp: 1.3 * U, dry: .2, jit: 10 });
-    }
-  }
-  if (y > iy0 - 8 * U) ironOver(x - ex, y - ey, x + ex, y + ey);
-}
-const treeOff = xf => xf > 1.1 ? .62 : .3;                      // the fruit trees stand far off, under the hill
-function leafStroke(x, y) {                                    // the walnut and its neighbours
-  const R = PP.R, d = zf - thin, k = R(), sz = (zx > 1.1 ? .7 : 1.05) * U;
-  veil(treeOff(zx));
-  if (d < .22) {                                               // thin leaves with the sun in them
-    if (!byFigure(x, y, 5 * sz)) PP.dab(x, y, (2 + R() * 3) * sz, pal.accent && season === 'autumn' && k > .6 ? pick(pal.accent, R()) : k < .45 ? pal.folLight : k < .7 ? pal.folSun : pal.folMid, { a: .88, den: .8, core: .6, s: 1.5 * U });
+const GREEN = z => z === LEAVES || z === HEDGE || z === SHRUB || z === FENCE;   // the fence stands in front of them: a stroke may run on behind it
+function leafStroke(x, y, k) {                                 // the walnut, the hedge, the bushes: leaves, as light as the photograph has them, the smaller the farther off
+  const R = PP.R, q = R(), xf = zx, pf = zy, sz = (k === LEAVES ? .95 : k === SHRUB ? .85 : .7) * U, wisp = k === LEAVES && zf === M_WISP, fenced = y > iy0 - 8 * U;
+  veil(k === HEDGE ? .5 : k === SHRUB ? .2 : .3);
+  if (bare) {                                                  // the walnut has no leaves then, and is not painted here
+    if (k === SHRUB) inBush(xf, pf);
+    thicket(x, y, k === SHRUB ? py(stop) : hedgeY[col(x)], mix(mix(pal.twigs[2], pal.haze, k === SHRUB ? .2 : .5), white ? pal.snow : pal.meadow[2], .3));
+    if (fenced) ironOver(x - 9 * U, y - 9 * U, x + 9 * U, y + 9 * U);
     return;
   }
-  let c = green(clamp(folLum(x, y) + .08 + (R() - .5) * .2 - smooth(.42, .6, zy) * .3));
-  if (pal.accent && season === 'autumn' && k > .9) c = pick(pal.accent, R());
+  const l0 = k === SHRUB ? bushLight(xf, pf) : light(xf, pf), by = byFigure(x, y, 7 * sz);       // beside the saint the dabs are small and keep off him
+  if (wisp || (k === HEDGE && y - hedgeY[col(x)] < .006 * PH)) {   // thin leaves with the sun in them, and the ragged rim of the hedge
+    if (!by) PP.dab(x, y, (2 + R() * 3) * sz, pal.accent && season === 'autumn' && q > .6 ? pick(pal.accent, R()) : q < .45 ? pal.folLight : q < .7 ? pal.folSun : pal.folMid, { a: .88, den: .8, core: .6, s: 1.5 * U });
+    return;
+  }
+  let c = green(tone(l0));
+  if (pal.bloom && k !== LEAVES && l0 > 3 && q > (season === 'spring' ? .9 : .97)) { PP.dab(x, y, (1.6 + R() * 1.6) * sz, pal.bloom, { a: .9, den: 1.2, core: .7, s: 1.2 * U, jit: 4 }); return; }   // it flowers in May
+  if (pal.accent && season === 'autumn' && l0 > 2 && q > .9) c = pick(pal.accent, R());
   const sd = shadow(x, y); if (sd) c = mix(c, pal.folDeep, sd * .4);
-  const a = R() * Math.PI, l = (3 + R() * 6) * sz;
-  if (byFigure(x, y, l)) PP.dab(x + ax * 1.2 * U, y + ay * 1.2 * U, 1.3 * sz, c, { a: .9, den: 1.3, core: .7, s: U, jit: 8 });
-  else PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (3 + R() * 4.5) * sz, c, { a: .87, sp: 1.3 * U, dry: .18, jit: 9 });
+  if (by) { PP.dab(x + ax * 1.2 * U, y + ay * 1.2 * U, 1.3 * sz, c, { a: .9, den: 1.3, core: .7, s: U, jit: 8 }); return; }
+  const a = R() * Math.PI, ca = Math.cos(a), sa = Math.sin(a), l = (2.5 + R() * 5) * sz, wd = (3 + R() * 4.5) * sz;
+  run(x, y, ca, sa, l, GREEN, Math.max(1.5, 2 * sz));
+  const r0 = reach[0], r1 = reach[1];
+  PP.brush(x - ca * r0, y - sa * r0, x + ca * r1, y + sa * r1, wd, c, { a: .87, sp: 1.25 * U, dry: .18, jit: 9 });
+  if (fenced) { const ex = Math.abs(ca) * l + wd * .6, ey = Math.abs(sa) * l + wd * .6; ironOver(x - ex, y - ey, x + ex, y + ey); }   // what of the fence it ran over goes back in front of it
 }
 function limbStroke() {                                        // a stretch of bark
   const R = PP.R, k = R() * limbWeight;
@@ -473,7 +540,7 @@ function limbStroke() {                                        // a stretch of b
   const s = limbs[a], span = Math.min(1, (8 + R() * 16) * U / s.len), t0 = R() * (1 - span), tm = t0 + span / 2, t1 = t0 + span, mx = limbX(s, tm), my = limbY(s, tm);
   if (mx < 0 || my < 0 || mx >= W || my >= H || !at(mx, my) || zone(mx, my) !== LIMB) return;   // not where leaves or the hedge hide it
   const bark = mix(pal.trunk, pal.towerLight, s.depth < 2 ? .2 : .08), q = R(), o = { a: .93, jit: 8, dry: .06, sp: Math.min(1.2 * U, s.w), bow: .03 };
-  veil(treeOff(zx));
+  veil(.3);
   for (const [u, v] of [[t0, tm], [tm, t1]]) {
     const ax = limbX(s, u), ay = limbY(s, u), bx = limbX(s, v), by = limbY(s, v);
     PP.brush(ax, ay, bx, by, s.w, bark, o);
@@ -498,7 +565,7 @@ function bedStroke(x, y) {                                     // whatever has g
     PP.dab(x, y, r, pal.peony[R() < .5 ? 0 : 1], { a: .95, den: 1.6, core: .85, s: 1.2 * U, jit: 5 }); PP.dab(x - r * .2, y - r * .25, r * .5, pal.peony[2], { a: .9, den: 1.4, core: .7, s: U, jit: 4 });
   } else if (pal.cranesbill && k > .93 && xf < .16 && pf > wallY(BACK, xf) - .035) PP.dab(x, y, (.9 + R() * .6) * sz, pal.cranesbill, { a: .95, den: 2, core: .9, s: U, jit: 5 });
   else {                                                       // leaves: light on top, dark in among them
-    let c = ramp(pal.bed, clamp(.5 + (fbm(xf * 30 + 2, pf * 40) - .5) * 1.7 + (R() - .5) * .3 + .25 * smooth(.035, 0, depth) - .25 * smooth(.03, .12, depth)));
+    let c = ramp(pal.bed, clamp(tone(light(xf, pf)) + .12 * smooth(.035, 0, depth)));
     const sd = shadow(x, y); if (sd) c = mix(c, pal.bed[0], sd * .45);
     const a = -Math.PI / 2 + (R() - .5) * 2.4, l = (2.5 + R() * 4) * sz, wd = (1.6 + R() * 2) * sz;
     xe = x + Math.cos(a) * l; ye = y + Math.sin(a) * l; r = wd * .6 + l * .13 + .5 * U;
@@ -767,7 +834,7 @@ function grassStroke(x, y, path) {
   if (white && k < white * .9 * (1 - dim)) { snowDab(x, y, (2 + R() * 3.5) * sz); return; }
   const sd = shadow(x, y);
   if (path) {                                                  // trodden earth, grass creeping in from either side
-    let c = mix(pal.gravel, pal.meadow[3], (xf > 1.05 && pf < NEAR ? smooth(.55, 1, Math.abs(xf - pathX(pf)) / pathW(pf)) : smooth(NEAR + .04, NEAR, pf)) * .6 + R() * .12);
+    let c = mix(pal.gravel, pal.meadow[3], smooth(NEAR + .04, NEAR, pf) * .6 + R() * .12);
     if (wet) c = mix(mix(c, pal.dark, .25), pal.skyLow, .18);
     if (dim) c = mix(c, pal.meadow[0], dim * .7);
     const l = (3 + R() * 7) * sz;
@@ -776,7 +843,7 @@ function grassStroke(x, y, path) {
   }
   if (pal.daisy && k > (season === 'spring' ? .975 : .99) && pf > .66 && !dim) { PP.dab(x, y, (.8 + R() * .7) * sz, pick(pal.daisy, R()), { a: .95, den: 1.8, core: .85, s: U, jit: 4 }); return; }
   if (season === 'autumn' && k > .965) { PP.dab(x, y, (1.2 + R() * 1.4) * sz, pick(pal.bits, R()), { a: .9, den: 1.4, core: .8, s: 1.3 * U }); return; }   // leaves the walnut has dropped
-  let c = ramp(pal.meadow, .2 + fbm(xf * 22 + 5, pf * 30) * .75 + (R() - .5) * .3);
+  let c = ramp(pal.meadow, .12 + tone(what(xf, pf) === M_GRASS ? lev : 7 * clamp(fbm(xf * 22 + 5, pf * 30) * 1.3 - .15)) * .8);   // where the photograph has no grass, it is as light as it happens to be
   if (k < .08) c = mix(c, pal.straw, .5);
   if (sd) c = mix(c, pal.meadow[0], sd * .45);
   if (dim) c = mix(c, mix(pal.meadow[0], pal.dark, .3), dim);   // no sun gets under the bench
@@ -788,7 +855,7 @@ function grassStroke(x, y, path) {
 // ---------- every stroke where it belongs ----------
 function paintAt(x, y, k) {
   if (k === SKY || k === LIMB || k === FENCE) return;
-  if (k === HILL) hillStroke(x, y); else if (k === HEDGE) hedgeStroke(x, y); else if (k === LEAVES) leafStroke(x, y); else if (k === BEDS) bedStroke(x, y);
+  if (k === HILL) hillStroke(x, y); else if (k === HEDGE || k === SHRUB || k === LEAVES) leafStroke(x, y, k); else if (k === BEDS) bedStroke(x, y);
   else if (k === STATUE) figureStroke(x, y); else if (k === WALL) wallStroke(x, y); else if (k === BENCH) benchStroke(x, y); else if (k === LANTERN) lanternStroke(x, y);
   else grassStroke(x, y, k === PATH);
 }
@@ -803,7 +870,7 @@ function fogStroke() {                                         // fog hangs unde
   const R = PP.R, x = R() * W, depth = R(), y = py(.42 + depth * .26);
   if (y < 0 || y >= H || !at(x, y) || !traits.fog) return;
   const z = zone(x, y);
-  if ((z !== HILL && z !== HEDGE && z !== GRASS && z !== PATH) || fbm((x + time * 9 * U) * .003 / U, y * .012 / U + time * .008) + (1 - depth) * .2 < .5) return;
+  if ((z !== HILL && z !== HEDGE && z !== SHRUB && z !== GRASS && z !== PATH) || fbm((x + time * 9 * U) * .003 / U, y * .012 / U + time * .008) + (1 - depth) * .2 < .5) return;
   PP.haze = null;
   PP.dab(x, y, (8 + R() * 16) * U, fogCol(), { a: .4 - depth * .15, den: .22, s: 4 * U, sx: 2.6, sy: .7, core: .1, jit: 4 });
 }
@@ -833,12 +900,12 @@ function coatStroke(x0, y0, leaves, again) {                   // a fresh coat: 
     if (leaves) {                                              // the trees: they stand in front of the sky
       if (k !== LEAVES || (again && yc > ridgeY[col(xc)] + 4 * U)) continue;
       const a = (R() - .5) * 1.2;
-      veil(treeOff(xf)); PP.brush(x - Math.cos(a) * l * .7, y - Math.sin(a) * l * .7, x + Math.cos(a) * l * .7, y + Math.sin(a) * l * .7, zf - thin < .3 ? 9 * U : 20 * U, green(.3 + clamp(folLum(x, y)) * .3), o);
+      veil(.3); PP.brush(x - Math.cos(a) * l * .7, y - Math.sin(a) * l * .7, x + Math.cos(a) * l * .7, y + Math.sin(a) * l * .7, zf === M_WISP ? 9 * U : 20 * U, green(.3 + light(xf, pf) / 7 * .3), o);
       continue;
     }
     if (k === SKY || k === LIMB) continue;
     if (k === HILL) { veil(.8); PP.brush(x - l, y, x + l, y - l * .1, 16 * U, mix(bare ? mix(pal.twigs[1], white ? pal.snow : pal.meadow[2], .4) : green(.5), pal.haze, .3), o); }
-    else if (k === HEDGE || k === LEAVES) { const a = (R() - .5) * 1.2; veil(k === HEDGE ? .5 : treeOff(xf)); PP.brush(x - Math.cos(a) * l * .8, y - Math.sin(a) * l * .8, x + Math.cos(a) * l * .8, y + Math.sin(a) * l * .8, 20 * U, bare ? mix(mix(pal.twigs[2], pal.haze, .5), pal.twigs[1], .5) : green(.32), o); }
+    else if (k === HEDGE || k === LEAVES || k === SHRUB) { const a = (R() - .5) * 1.2; veil(k === HEDGE ? .5 : k === SHRUB ? .2 : .3); PP.brush(x - Math.cos(a) * l * .8, y - Math.sin(a) * l * .8, x + Math.cos(a) * l * .8, y + Math.sin(a) * l * .8, 20 * U, bare ? mix(mix(pal.twigs[2], pal.haze, .5), pal.twigs[1], .5) : green(.32), o); }
     else if (k === BEDS || k === FENCE) { veil(.22); PP.brush(x - l, y, x + l, y, 16 * U, white ? mix(pal.bed[1], pal.snow, white * .7) : pal.bed[1], o); }
     else if (k === STATUE || k === LANTERN) { veil(.26); PP.brush(x, y - 7 * U, x, y + 7 * U, 5 * U, k === LANTERN ? pal.lampRed : zp === CAPE ? pal.fur[1] : zp === CLOAK ? pal.robe[1] : ramp(pal.figure, zp === STAR || zp === CAP || zp === CROSS || zp === HAIR ? .35 : .62), o); }
     else if (k === WALL) {                                     // the coping is narrow: a stroke right along the middle of its top, and of its front
@@ -909,21 +976,21 @@ const place = {
   layout(v) {
     W = v.W; H = v.H; U = v.U;
     // An upright screen shows the photograph from top to bottom and some of the grass at our feet, and a slice of its
-    // width; a wide one loses some of the sky and has the saint on its left, the hill and the meadow beyond him.
+    // width; a wide one loses some of the sky and has the photograph in its middle, what was made up to either side.
     const a = W / H, wide = clamp((a - .75) / .65), tall = clamp((.75 - a) / .29), shown = 1.05 - .19 * wide + .15 * tall;
     Y0 = .12 * wide; PH = H / shown; PW = PH * .75;
     if (W / PW > 3.2) { PW = W / 3.2; PH = PW / .75; Y0 = .98 - H / PH; }                 // a very wide one loses some more of it
     const n = W / PW;                                          // how many photos wide the picture is
-    X0 = n < 1 ? (1 - n) * .7 : .49 - (.49 - .28 * smooth(1, 1.6, n)) * n;
+    X0 = (1 - n) * (n < 1 ? .7 : .5);
     place.hz = py(.42);
-    buildThings(); buildTrees();
+    buildThings(); buildTrees(); buildBushes();
     nCol = Math.ceil(W) + 1;
     ridgeY = new Float32Array(nCol); hedgeY = new Float32Array(nCol); bedY = new Float32Array(nCol); grassY = new Float32Array(nCol); coping = new Float32Array(nCol);
     landTop = H;
     for (let i = 0; i < nCol; i++) {
       const xf = fx(i + .5);
       ridgeY[i] = py(hillTop(xf)); hedgeY[i] = Math.max(ridgeY[i] + 2 * U, py(hedgeTop(xf))); grassY[i] = py(grassTop(xf));
-      bedY[i] = xf < END ? py(bedTop(xf)) : 1e9; coping[i] = walled(xf) ? py(wallY(BACK, xf)) : 1e9;
+      bedY[i] = xf > WBEG && xf < 1.04 ? py(bedTop(xf)) : 1e9; coping[i] = xf > WBEG && xf < WEND ? py(wallY(BACK, xf)) : 1e9;
       if (ridgeY[i] < landTop) landTop = ridgeY[i];
     }
     landTop = Math.max(0, landTop - 8 * U);
@@ -948,7 +1015,7 @@ const place = {
     for (let i = n - 2; i >= 0; i--) { const e = ridgeY[i] + dip; if (Math.abs(e - y) > .3) { c.lineTo(i + 1, y); c.lineTo(i + 1, e); y = e; } }
     c.lineTo(0, y); c.closePath();
   },
-  front(s, x, y) { use(s); return treeAt(x, y) !== 0; },       // the walnut stands in front of the sky, leaves and limbs
+  front(s, x, y) { use(s); zx = fx(x); zy = fy(y); return treeAt(x, y) !== 0; },       // the walnut stands in front of the sky, leaves and limbs
   orb(o) {                                                     // the sun and the moon stand clear of the hill
     let top = 1e9;
     for (let i = Math.max(0, (o.x - o.r * 1.6) | 0); i < Math.min(nCol, o.x + o.r * 1.6); i++) top = Math.min(top, ridgeY[i]);
