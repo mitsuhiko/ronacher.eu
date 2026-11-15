@@ -90,6 +90,21 @@ function setMode(m) {
   announce(); retheme();
 }
 if (themeButton) themeButton.addEventListener('click', () => setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length]));
+// N or D flips what the picture looks like, between auto and its opposite: from auto to whichever of
+// night and day the system does not want, and from there back to auto.  Pinned to the same as auto
+// would be, it goes over to the other one instead, so every press is a change one can see.
+function flipMode() {
+  const night = !wantNight(), autoNight = !!(darkQuery && darkQuery.matches);
+  setMode(night === autoNight ? 'auto' : night ? 'night' : 'day');
+}
+document.addEventListener('keydown', e => {
+  if (e.defaultPrevented || e.repeat || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (e.key !== 'n' && e.key !== 'd') return;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  e.preventDefault();
+  flipMode();
+});
 if (darkQuery) {
   const onScheme = () => { announce(); retheme(); };
   if (darkQuery.addEventListener) darkQuery.addEventListener('change', onScheme); else darkQuery.addListener(onScheme);
