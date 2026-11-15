@@ -1,5 +1,5 @@
 /* ------------------------------------------------------------------ *
- *  Vienna, on top of the Kahlenberg: the Stefaniewarte, the old
+ *  Vienna, on top of the Hermannskogel: the Habsburgwarte, the old
  *  lookout tower in its clearing among the trees, hung with the dishes
  *  and aerials it has to carry these days, on a bright day in May.
  *
@@ -12,7 +12,7 @@
  *  who were about that day are not in it.
  *  scene.js paints the sky and says what a place has to bring along.
  * ------------------------------------------------------------------ */
-(window.viennaPlaces = window.viennaPlaces || []).push({ id: 'stefaniewarte', name: 'Stefaniewarte', make(kit) {
+(window.viennaPlaces = window.viennaPlaces || []).push({ id: 'habsburgwarte', name: 'Habsburgwarte', make(kit) {
 'use strict';
 const { PP, clamp, smooth, mix, pick, rng, hash1, vnoise, fbm, wind, light, spend } = kit;
 
@@ -873,13 +873,13 @@ const place = {
   },
   paint(pace, s, o) {                                          // s, o: the picture and the one under it, where they show this place
     const ua = U * U * 1e6;
-    spend('sw-leaf', RATE.leaf * W * leafFoot / ua * pace, leafStroke);
-    spend('sw-ground', RATE.ground * W * (H - groundTop) / ua * pace, groundStroke);
-    spend('sw-tower', RATE.tower * Math.max(0, TX1 - TX0) * Math.max(0, TY1 - TY0) / ua * pace, towerStroke);
-    spend('sw-thin', RATE.thin * thinLength / (10 * U) * pace, thinStroke);
-    spend('sw-limb', RATE.limb * limbLength / (14 * U) * pace, limbStroke);
-    if ((s && s.night) || (o && o.night)) spend('sw-lamp', RATE.lamp * pace, lampDab);
-    if ((s && s.traits.fog) || (o && o.traits.fog)) spend('sw-fog', RATE.fog * W * .18 * PH / ua * pace, fogStroke);
+    spend('hw-leaf', RATE.leaf * W * leafFoot / ua * pace, leafStroke);
+    spend('hw-ground', RATE.ground * W * (H - groundTop) / ua * pace, groundStroke);
+    spend('hw-tower', RATE.tower * Math.max(0, TX1 - TX0) * Math.max(0, TY1 - TY0) / ua * pace, towerStroke);
+    spend('hw-thin', RATE.thin * thinLength / (10 * U) * pace, thinStroke);
+    spend('hw-limb', RATE.limb * limbLength / (14 * U) * pace, limbStroke);
+    if ((s && s.night) || (o && o.night)) spend('hw-lamp', RATE.lamp * pace, lampDab);
+    if ((s && s.traits.fog) || (o && o.traits.fog)) spend('hw-fog', RATE.fog * W * .18 * PH / ua * pace, fogStroke);
     PP.haze = null;
   },
   coat(cells, i, j, s) {                                       // the land's share of a fresh coat: everything that is not sky
