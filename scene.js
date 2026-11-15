@@ -1156,9 +1156,16 @@ document.addEventListener('keydown', e => {
   if (!Object.prototype.hasOwnProperty.call(keys, e.key)) return;
   const t = e.target;
   if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
-  if (e.key === ' ' && t && t.closest && t.closest('button, a, summary')) return;   // space presses what has the focus
   e.preventDefault();
   keys[e.key]();
+});
+// Space is the next season even when a button has the focus (Enter still presses it); some browsers press
+// a button when space comes up again, so that is held back too.
+document.addEventListener('keyup', e => {
+  if (e.key !== ' ' || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  e.preventDefault();
 });
 if (placeButton) placeButton.addEventListener('click', () => nextPlace(1));
 if (seasonButton) seasonButton.addEventListener('click', nextSeason);
