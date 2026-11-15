@@ -3,20 +3,21 @@
  *  lookout tower in its clearing among the trees, hung with the dishes
  *  and aerials it has to carry these days, on a bright day in May.
  *
- *  Like the Freie Mitte this one is painted after a photograph closely:
- *  stefaniewarte-map.js, loaded before this file, says for every point
- *  of it what there is (sky, leaves, grass, gravel) and how light it is
- *  there.  The tower is not in the map: it is drawn by hand, stone by
- *  stone.  Nor are the people who were about that day.
+ *  It is painted after a photograph, measured by hand: the tower stone
+ *  by stone, how high the wood stands against the sky, the boughs that
+ *  hang in from above, the young trees with hardly a leaf on them, where
+ *  the grass ends and the gravel begins, and where in all that the sun
+ *  lies and where the shade.  Crown by crown the wood is made up, and so
+ *  is how it goes on beyond the photograph on either side.  The people
+ *  who were about that day are not in it.
  *  scene.js paints the sky and says what a place has to bring along.
  * ------------------------------------------------------------------ */
 (window.viennaPlaces = window.viennaPlaces || []).push({ id: 'stefaniewarte', name: 'Stefaniewarte', make(kit) {
 'use strict';
 const { PP, clamp, smooth, mix, pick, rng, hash1, vnoise, fbm, wind, light, spend } = kit;
-const MAP = window.viennaMaps.stefaniewarte;
 
 // ---------- what the brush is looking at ----------
-let W = 0, H = 0, U = 1, time = 0;          // the view (CSS pixels, the stroke unit) and the clock
+let W = 0, H = 0, U = 1, time = 0, sway = 0;   // the view (CSS pixels, the stroke unit), the clock and how far the wind pushes the leaves
 let PW = 1, PH = 1;                         // the photo's width and height in pixels
 let pal = null, traits = null, night = false, season = '', bare = false, snow = false, sun = 1;   // sun: how hard the shadows are
 const use = s => {
@@ -52,39 +53,128 @@ const shadow = (x, y) => traits.shadow && !night ? traits.shadow * smooth(.5, .7
 const fogCol = () => night ? mix(pal.skyLow, pal.fog, .35) : pal.fog;   // by night it is no lighter than the sky
 const veil = d => { PP.haze = traits.fog ? [fogCol(), clamp(d * 1.4 - .1, 0, .85) * traits.fog] : null; };   // fog: the farther off, the paler
 
-// ---------- the map ----------
-// One character a cell: what it is, times eight, plus how light it is, from 0 to 7.  For a wisp of leaves that is
-// how much of the cell they fill.
-const SKY = 0, LEAF = 1, WISP = 2, GRASS = 3, GRAVEL = 4, TOWER = 5, THIN = 6, LIMB = 7, THICKET = 8;
-const MW = MAP.w, MH = MAP.h, GROUND = MAP.ground, cells = new Uint8Array(MW * MH);
-{ const code = new Uint8Array(128);
-  for (let c = 35, v = 0; c < 127; c++) if (c !== 92) code[c] = v++;
-  for (let i = 0; i < cells.length; i++) cells[i] = code[MAP.cells.charCodeAt(i)]; }
-// Beyond the photograph the wood goes on as its own mirror image: drawn out, pulled out of shape, its trees taller
-// here and lower there, so that it does not show.
-function fold(xf, pf) {
-  const d = xf < 0 ? -xf : xf - 1;
-  let m = d * .75 + smooth(0, .25, d) * (vnoise(xf * 1.7 + 7.3, pf * 2.5) - .5) * .11;   // never so much that it would turn back
-  if (m < 0) m = -m;
-  m %= 2; if (m > 1) m = 2 - m;
-  return xf < 0 ? m : 1 - m;
-}
-const stretch = (xf, pf) => pf < GROUND ? GROUND - (GROUND - pf) * (1 + smooth(0, .22, xf < 0 ? -xf : xf - 1) * (vnoise(xf * 2.3, 1.1) - .5) * .7) : pf;
-let lev = 0;                                                   // what what() learnt on the way: how light it is
-function what(xf, pf, raw) {                                   // what there is at a point of the photo
-  if (!raw) {                                                  // a cell has no corners
-    const a = xf * MW * .8, b = pf * MH * .8;
-    xf += (vnoise(a, b) - .5) * 1.5 / MW; pf += (vnoise(a + 31.7, b + 17.3) - .5) * 1.5 / MH;
-  }
-  if (xf < 0 || xf > 1) { const f = fold(xf, pf); pf = stretch(xf, pf); xf = f; }
-  const i = xf * MW | 0, j = pf * MH | 0, v = cells[(j < 0 ? 0 : j >= MH ? MH - 1 : j) * MW + (i >= MW ? MW - 1 : i)];
-  lev = v & 7; return v >> 3;
-}
-// In winter the wood is bare: sky between the limbs of the trees, down to where trunks and twigs stand too close.
+// ---------- the wood ----------
+// It stands all round the clearing.  How high its leaves stand against the sky is measured along its top: [x, y].
+// Beyond the photograph it goes on as it likes, its trees taller here and lower there.  In winter it is bare: sky
+// between the limbs of the trees, down to where trunks and twigs stand too close (DENSE).
+const GROUND = .703;                                           // where the trees end and the clearing begins
+const RIDGE = [[0, .4], [.1, .405], [.115, .44], [.15, .455], [.17, .49], [.23, .5], [.26, .51], [.3, .525], [.4, .535], [.44, .55], [.47, .56], [.5, .59], [.55, .6], [.62, .6], [.7, .595],
+  [.76, .585], [.8, .588], [.82, .58], [.84, .555], [.86, .5], [.875, .48], [.9, .475], [1, .47]];
 const DENSE = [[0, .6], [.2, .615], [.45, .64], [.62, .645], [.8, .64], [1, .605]];
-const dense = xf => along(DENSE, xf < 0 || xf > 1 ? fold(xf, .6) : xf) + (vnoise(xf * 30, 5.5) - .5) * .022 + (vnoise(xf * 110, 2.5) - .5) * .008;
-const leafHere = (x, y) => vnoise(x * .13 / U, y * .13 / U) < .32 + lev * .06;   // a wisp of leaves is leaves here and sky there
-const close = (xf, pf) => { const m = xf < 0 || xf > 1 ? fold(xf, pf) : xf; return clamp((.52 - pf) / .2) * (m > .66 || m < .22 ? 1 : .35); };   // the boughs overhead are near, the wood is not
+const out = xf => xf < 0 ? -xf : xf > 1 ? xf - 1 : 0;          // how far beyond the photograph a point lies
+function ridge(xf) {
+  const d = out(xf);
+  let y = along(RIDGE, xf);
+  if (d) y += (.52 - .26 * smooth(.5, .85, vnoise(xf * 1.9 + 3.3, 1.7)) + (vnoise(xf * 7, 4.2) - .5) * .09 - y) * smooth(0, .15, d);
+  return y;
+}
+const dense = xf => along(DENSE, xf) + (vnoise(xf * 30, 5.5) - .5) * .022 + (vnoise(xf * 110, 2.5) - .5) * .008;
+const close = (xf, pf) => clamp((.52 - pf) / .2) * (xf > .66 || xf < .22 ? 1 : .35);   // the boughs overhead are near, the wood is not
+// A crown is a round: [x, y, how big].  Those of the boughs that hang in from above are measured: at the top on the
+// left, further down on the left, over the tower, and all that the tree close by on the right holds out.  The trees
+// they belong to stand beyond the photograph, and there is more of them there.
+const WOODS = 0, BOUGH = 1, SHOOT = 2;
+const OVERHEAD = [[.03, .02, .06], [.09, .02, .03], [.02, .08, .04], [.14, .02, .02], [.15, .04, .012], [-.07, .03, .07], [-.17, 0, .08], [-.11, .1, .05], [-.24, .07, .05],
+  [-.01, .285, .07], [.045, .29, .035], [.005, .355, .025], [.02, .385, .02], [-.06, .2, .05], [-.1, .26, .08], [-.17, .31, .08], [-.09, .36, .07], [-.2, .39, .07],
+  [.66, 0, .05], [.74, .005, .055],
+  [.93, .01, .08], [1, .03, .08], [.88, .09, .085], [.99, .1, .1], [.8, .113, .04], [.9, .17, .075], [1, .2, .1], [.95, .24, .065], [.91, .29, .065], [1, .31, .07], [.89, .335, .04], [.86, .14, .05], [.87, .22, .045], [.9, .385, .045], [.975, .42, .045],
+  [1.1, .03, .1], [1.3, .05, .06], [1.2, .09, .09], [1.12, .15, .09], [1.25, .2, .07], [1.15, .26, .08], [1.22, .32, .06], [1.1, .34, .06], [1.08, .42, .04]];
+// Young trees stand up out of the wood with hardly a leaf on them: [from x, y, how big, to x, y, how big], crown
+// by crown along them.
+const SHOOTS = [[.3, .415, .006, .31, .47, .012], [.285, .44, .006, .3, .5, .013], [.33, .445, .006, .315, .5, .012], [.31, .47, .012, .31, .525, .018],
+  [.245, .432, .006, .24, .47, .011], [.225, .455, .006, .24, .5, .013], [.26, .465, .006, .245, .505, .012], [.195, .44, .005, .2, .49, .012],
+  [.385, .42, .006, .38, .47, .012], [.365, .445, .006, .375, .5, .012], [.41, .44, .006, .39, .5, .013], [.445, .47, .006, .42, .5, .011], [.4, .5, .012, .42, .545, .016],
+  [.79, .54, .006, .8, .59, .013], [.815, .55, .006, .805, .585, .011], [.835, .55, .006, .84, .58, .012], [.585, .572, .007, .575, .6, .015], [.52, .575, .007, .515, .6, .013]];
+// The wood itself is a heap of crowns under its top, made up: they are kept in a coarse grid, how deep in the
+// leaves a point is, whose they are and how high up in their crown.  It reaches a little beyond the picture (gPad),
+// as a stroke may.
+let rounds = [], gCell = 3, gPad = 0, gCols = 0, gRows = 0, gQ = null, gK = null, gV = null;
+function deep(xf, pf) {                                        // how deep in a crown: 1 in its middle, 0 at its edge
+  let q = -1;
+  for (const c of rounds) {
+    const dx = (xf - c[0]) / c[2]; if (dx > 1 || dx < -1) continue;
+    const d = 1 - Math.hypot(dx, (pf - c[1]) / (c[2] * .75)); if (d > q) q = d;
+  }
+  return q;
+}
+function buildWood() {
+  const x0 = Math.min(fx(0, 0), fx(0, H)) - .15, x1 = Math.max(fx(W, 0), fx(W, H)) + .15;
+  rounds = [];
+  for (const c of OVERHEAD) if (c[0] + c[2] > x0 && c[0] - c[2] < x1) rounds.push([c[0], c[1], c[2], BOUGH]);
+  for (const t of SHOOTS) for (let f = 0; f <= 1;) { const r = t[2] + (t[5] - t[2]) * f; rounds.push([t[0] + (t[3] - t[0]) * f, t[1] + (t[4] - t[1]) * f, r, SHOOT]); f += r * .9 / Math.hypot(t[3] - t[0], (t[4] - t[1]) * 4 / 3); }
+  for (let n = Math.floor(x0 / .03); n <= x1 / .03; n++) {     // one stands up to the top of the wood, more of them under it
+    const r = rng(7000 + n), x = (n + r()) * .03, top = ridge(x) + (r() - .4) * .03, s = .02 + r() * .035;
+    rounds.push([x, top + s * .6, s, WOODS]);
+    for (let y = top + .03 + r() * .04; y < GROUND + .04; y += .03 + r() * .04) rounds.push([x + (r() - .5) * .04, y, .035 + r() * .035, WOODS]);
+  }
+  gCell = 2.5 * U; gPad = 12 * gCell; gCols = Math.ceil((W + 2 * gPad) / gCell) + 1; gRows = Math.ceil((leafFoot + gPad) / gCell) + 1;
+  gQ = new Float32Array(gCols * gRows).fill(-1); gK = new Uint8Array(gCols * gRows); gV = new Int8Array(gCols * gRows);
+  for (const c of rounds) {
+    const cx = px(c[0], c[1]) + gPad, cy = py(c[1]) + gPad, r = c[2] * PW;
+    const i0 = Math.max(0, Math.floor((cx - r * 1.15) / gCell)), i1 = Math.min(gCols - 1, Math.ceil((cx + r * 1.15) / gCell)), j0 = Math.max(0, Math.floor((cy - r) / gCell)), j1 = Math.min(gRows - 1, Math.ceil((cy + r) / gCell));
+    for (let j = j0; j <= j1; j++) for (let i = i0; i <= i1; i++) {
+      const x = (i + .5) * gCell - gPad, y = (j + .5) * gCell - gPad, v = (c[1] - fy(y)) / (c[2] * .75), q = 1 - Math.hypot((fx(x, y) - c[0]) / c[2], v), n = j * gCols + i;
+      if (q > gQ[n]) { gQ[n] = q; gK[n] = c[3]; gV[n] = clamp(v, -1, 1) * 100; }
+    }
+  }
+  for (let j = 0; j < gRows; j++) for (let i = 0; i < gCols; i++) {   // under its top the wood is leaves all through
+    const x = (i + .5) * gCell - gPad, y = (j + .5) * gCell - gPad, n = j * gCols + i;
+    if (gQ[n] < .6 && fy(y) > ridge(fx(x, y)) + .02) { if (gQ[n] < 0) gK[n] = WOODS; gQ[n] = .6; }
+  }
+}
+let zk = 0, zv = 0;                                            // what fol() learnt: whose the leaves are, how high up in their crown
+function fol(x, y) {                                           // > 0 inside the leaves
+  const i = Math.floor((x - sway + gPad) / gCell), j = Math.floor((y + gPad) / gCell);
+  if (i < 0 || j < 0 || i >= gCols || j >= gRows) return -1;
+  const n = j * gCols + i, q = gQ[n];
+  if (q <= -1) return -1;
+  zk = gK[n]; zv = gV[n] / 100;
+  const lace = (vnoise(x * .13 / U, y * .13 / U) - .5) * .8 + (vnoise(x * .03 / U + 7, y * .03 / U) - .5) * .45;   // leaf by leaf at its rim
+  return (zk === SHOOT ? q - .25 : q * 1.3) + lace;   // a young tree is all sprays, light shows through it everywhere
+}
+
+// ---------- grass and gravel ----------
+// The clearing is gravel.  Long grass stands at the foot of the wood, and weeds at the foot of the tower: how far
+// down it reaches, [x, y].  In front on the right, where nobody walks, it grows in tufts (a patch of it all round),
+// and from there the meadow goes on to the right.
+const VERGE = [[0, .731], [.05, .729], [.28, .724], [.31, .713], [.545, .709], [.552, .731], [.622, .731], [.63, .709], [.683, .709], [.69, .731], [.795, .733], [.81, .752], [.83, .762], [.845, .75], [.86, .722],
+  [.94, .72], [.95, .742], [1, .742]];
+const TUFTS = [[1, .765], [.95, .79], [.88, .81], [.9, .84], [.83, .852], [.76, .872], [.71, .89], [.66, .905], [.72, .925], [.74, .95], [.75, 1.2], [4, 1.2], [4, .75], [1.25, .75]];
+function grassy(xf, pf) {
+  if (pf < along(VERGE, xf) + (vnoise(xf * 60, 7.7) - .5) * .008) return true;
+  return pf > .74 && xf > .6 && vnoise(xf * 45, pf * 70 + 5) > .2 && inPoly(TUFTS, xf + (vnoise(xf * 40, pf * 55) - .5) * .03, pf + (vnoise(xf * 40 + 31.7, pf * 55 + 17.3) - .5) * .02);
+}
+// The trees behind us throw their shade on it: deep on the left (all round it), with the sun in a patch that runs
+// down the middle, half and half on the right.
+const SHADOW = [[-.5, .8], [-.25, .77], [0, .737], [.05, .74], [.1, .755], [.18, .775], [.1, .79], [.3, .8], [.42, .812], [.4, .84], [.47, .857], [.4, .89], [.37, .9], [.33, .93], [.31, .95], [.33, .965],
+  [.43, .975], [.45, 1], [.45, 1.2], [-.45, 1.2]];
+const SUNLIT = [[.4, .8], [.82, .795], [.8, .825], [.68, .83], [.6, .85], [.62, .88], [.56, .9], [.56, .99], [.57, 1.2], [.45, 1.2], [.44, .97], [.33, .955], [.33, .93], [.4, .9], [.42, .88], [.48, .855],
+  [.42, .835], [.43, .81]];
+
+// ---------- light and shade ----------
+// How light a thing is, from 0, the dark in among the leaves, to 1, the sun on it, is measured as well.  The wood is
+// light along its top and dark at its foot, a crown light on top.  On that lie patches of sun and of shade: [x, y,
+// half as wide, half as high, how much lighter it is there].  The rest is leaves: clumps of them with the light on
+// their upper left, and no leaf quite as light as the next.
+const SPOTS = [[.06, .655, .13, .055, -.24], [.06, .5, .07, .04, -.1], [.38, .57, .1, .04, .08], [.93, .63, .1, .07, -.14], [.62, .66, .16, .03, -.05],   // in the wood: darkest at its foot on the left
+  [.04, .05, .1, .07, -.22], [.02, .29, .07, .07, .14], [.64, 0, .03, .02, .3], [.72, .02, .07, .03, .06],                                               // on the boughs overhead
+  [.91, .14, .07, .07, .2], [.81, .09, .04, .05, -.2], [.99, .08, .03, .1, -.1], [.95, .4, .08, .05, -.2]];
+const clumps = (xf, pf) => { const a = xf * 44 + 3, b = pf * 56, f = fbm(a, b); return (f - .47) * .6 + (f - fbm(a - .3, b - .34)) * .5; };
+function lightAt(k, xf, pf) {                                  // how light a thing (k) is at a point
+  if (k === LEAF) {
+    const top = ridge(xf);
+    let t = (zk === BOUGH ? .42 : .54 - .28 * clamp((pf - top) / (GROUND - top))) + .1 * zv;
+    for (const p of SPOTS) { const d = Math.hypot((xf - p[0]) / p[2], (pf - p[1]) / p[3]); if (d < 1.5) t += p[4] * smooth(1.5, .5, d); }
+    t += (vnoise(xf * 6 + 1.3, pf * 5) - .5) * .2;            // a tree is lighter than the next, or darker
+    return t + (clumps(xf, pf) * 1.2 + (vnoise(xf * 230, pf * 300 + 9) - .5)) * clamp(.3 + t * 1.4);   // in the shade they are all alike
+  }
+  const a = xf + (fbm(xf * 20, pf * 28) - .47) * .12, b = pf + (fbm(xf * 20 + 31.7, pf * 28 + 17.3) - .47) * .07 + (vnoise(xf * 95, pf * 130) - .5) * .012;   // the shade of leaves has no straight edge
+  if (k === GRASS) return b < .775 ? .76 + (vnoise(xf * 30, pf * 90) - .5) * .25 : inPoly(SHADOW, a, b) ? .1 : .05 + .6 * smooth(.25, .75, vnoise(xf * 24 + 3, pf * 60));
+  if (inPoly(SHADOW, a, b)) return .1 + .5 * smooth(.62, .85, vnoise(xf * 30 + 5, pf * 110));   // a fleck of sun here and there
+  const dapple = fbm(xf * 18 + 2, pf * 50);
+  if (b < .772 || inPoly(SUNLIT, a, b)) return .92 - .5 * smooth(.6, .72, dapple);
+  return .3 + .6 * smooth(.5, .38, dapple - .08 + smooth(.78, .95, b) * .18);   // further down there is less of the sun
+}
 
 // ---------- the tower ----------
 // What it is made of, part by part, from the tip of its mast to the table in front of it.  It leans: the photograph
@@ -298,8 +388,8 @@ const THINS = thinList();
 let OUT = [], skyA = 0, skyB = 0, thins = [], thinLength = 0;
 
 // ---------- the trees ----------
-// The map knows where their leaves are, not how they stand.  For winter, and where the leaves are thin, they are
-// grown: a trunk, limbs, twigs, none of them beyond where the map has leaves.
+// The crowns say where their leaves are, not how they stand.  For winter, and where the leaves are thin, they are
+// grown: a trunk, limbs, twigs, none of them beyond the crowns.
 // [x, foot, top, how wide it spreads, how it leans]
 const TREES = [[-.03, .71, .22, 1.1, .12], [.1, .71, .38, .9, .04], [.245, .71, .455, .5, 0], [.3, .71, .405, .45, -.02], [.385, .71, .41, .5, .1], [.445, .71, .55, .7, 0],
   [.8, .71, .515, .8, 0], [.885, .71, .44, .8, -.05], [1.0, .71, .42, .9, -.08]];
@@ -314,7 +404,7 @@ const maskAt = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : mask[((y / mCe
 function buildTrees() {
   limbs = [];
   let r = rng(5);
-  const leafy = (x, y) => { const pf = fy(y), xf = fx(x, y); return pf < GROUND + .01 && (pf > dense(xf) || what(xf, pf, true) !== SKY); };
+  const leafy = (x, y) => { const pf = fy(y), xf = fx(x, y); return pf < GROUND + .01 && (pf > dense(xf) || deep(xf, pf) > .05); };
   const add = (x1, y1, x2, y2, bend, w, depth, near) => {
     const len = Math.hypot(x2 - x1, y2 - y1), a = Math.atan2(y2 - y1, x2 - x1);
     limbs.push({ x1, y1, x2, y2, cx: (x1 + x2) / 2 - Math.sin(a) * len * bend * 2, cy: (y1 + y2) / 2 + Math.cos(a) * len * bend * 2, w, depth, near, k: r(), len });
@@ -328,19 +418,22 @@ function buildTrees() {
     const k = r() < .7 ? 2 : 3;
     for (let i = 0; i < k; i++) grow(x2, y2, a + (i - (k - 1) / 2) * .62 + (r() - .5) * .45, len * (.6 + r() * .2), Math.max(.6 * U, w * .6), depth + 1, near);
   };
-  const x0 = fx(-60 * U, H * .5) - .1, x1 = fx(W + 60 * U, H * .5) + .1;
-  for (let side = -1; side <= 1; side++) {                     // and their mirror images beyond the photograph
-    for (const t of TREES) {
-      const xf = side < 0 ? -t[0] : side > 0 ? 2 - t[0] : t[0], lean = side ? -t[4] : t[4];
-      if (xf < x0 || xf > x1 || (side < 0 && xf > -.04) || (side > 0 && xf < 1.04)) continue;
-      r = rng(31 + Math.round(xf * 1000));                     // every tree keeps its shape, whatever else is to be seen
-      const x = px(xf, t[1]), y = py(t[1]), h = (t[1] - t[2]) * PH, w = Math.max(1.3 * U, h * .011);
-      add(x, y, x + lean * h, y - h * .42, (r() - .5) * .08, w, 0, false);
-      const trunk = limbs[limbs.length - 1];
-      for (let i = 0; i < 5; i++) {
-        const a = -Math.PI / 2 + ((i + .5) / 5 - .5) * 2.2 * t[3] + (r() - .5) * .2 + lean, from = i === 2 ? 1 : .6 + r() * .4;
-        grow(limbX(trunk, from), limbY(trunk, from), a, h * (.27 - Math.abs(a + Math.PI / 2) * .05) * (.85 + r() * .3), w * .5, 1, false);
-      }
+  const x0 = fx(-60 * U, H * .5) - .1, x1 = fx(W + 60 * U, H * .5) + .1, trees = TREES.filter(t => t[0] > x0 && t[0] < x1);
+  for (let n = Math.floor(x0 / .15); n <= x1 / .15; n++) {     // beyond the photograph one stands every so often, as tall as the wood is there
+    if (n >= -1 && n <= 7) continue;
+    r = rng(900 + n);
+    const xf = (n + .2 + r() * .6) * .15;
+    trees.push([xf, .71, ridge(xf) + r() * .03, .5 + r() * .6, (r() - .5) * .2]);
+  }
+  for (const t of trees) {
+    const xf = t[0], lean = t[4];
+    r = rng(31 + Math.round(xf * 1000));                       // every tree keeps its shape, whatever else is to be seen
+    const x = px(xf, t[1]), y = py(t[1]), h = (t[1] - t[2]) * PH, w = Math.max(1.3 * U, h * .011);
+    add(x, y, x + lean * h, y - h * .42, (r() - .5) * .08, w, 0, false);
+    const trunk = limbs[limbs.length - 1];
+    for (let i = 0; i < 5; i++) {
+      const a = -Math.PI / 2 + ((i + .5) / 5 - .5) * 2.2 * t[3] + (r() - .5) * .2 + lean, from = i === 2 ? 1 : .6 + r() * .4;
+      grow(limbX(trunk, from), limbY(trunk, from), a, h * (.27 - Math.abs(a + Math.PI / 2) * .05) * (.85 + r() * .3), w * .5, 1, false);
     }
   }
   if (NEAR[0] < x1) {                                          // the one close by: its trunk, right up out of the picture, a bough to either side
@@ -382,6 +475,7 @@ function buildTrees() {
 
 // ---------- whose a point is ----------
 // Every point of the picture belongs to one thing, the nearest that covers it, and only that thing's strokes may start there.
+const SKY = 0, LEAF = 1, WISP = 2, GRASS = 3, GRAVEL = 4, TOWER = 5, THIN = 6, LIMB = 7, THICKET = 8;
 let zx = 0, zy = 0, zp = 0;                                    // what zone() learnt on the way: the point on the photo, the part of the tower
 let tops = null;                                               // where the trees stand too close for any sky, column by column
 function zone(x, y) {
@@ -392,14 +486,13 @@ function zone(x, y) {
   }
   const m = maskAt(x, y);
   if (m & 8) return LIMB;                                      // the trunk close by stands in front of everything but the tower
-  const k = what(xf, pf);
-  if (k >= GRASS) return k;
+  if (pf > GROUND + (vnoise(xf * 90, 2.3) - .5) * .006) return grassy(xf, pf) ? GRASS : GRAVEL;
   const top = tops[x < 0 ? 0 : x >= W ? W | 0 : x | 0], low = y > top;
   if (bare) return m & 1 ? LIMB : low || y > top - Math.max(0, vnoise(x * .22 / U, y * .035 / U) - .4) * 55 * U ? THICKET : SKY;   // twigs stand up out of the wood
-  if (k === LEAF) return LEAF;
-  if (k === WISP && leafHere(x, y)) return WISP;
+  const f = fol(x, y);
+  if (low || (f > .22 && zk !== SHOOT)) return LEAF;
+  if (f > 0) return WISP;                                      // at the rim of a crown the leaves are thin, and so are a young tree's
   if (m & 4) return LIMB;                                      // among leaves the twigs are not to be seen
-  if (low) { lev = 2; return LEAF; }
   return SKY;
 }
 const GREEN = k => k === LEAF || k === WISP;
@@ -424,17 +517,15 @@ function leafStroke() {                                        // somewhere abov
 }
 function paintLeaf(x, y, k) {
   const R = PP.R, xf = zx, pf = zy, near = close(xf, pf), sz = (.5 + near * .6) * U, q = R();
-  let l0 = lev;
-  if (k === LEAF && zone(x - wind(time) * 2 * sz, y) === LEAF) l0 = lev;   // the wind moves the light about in them
   veil(.6 - near * .5);
   if (k === WISP) {                                            // thin leaves with the sun in them
     const col = pal.accent && q > (season === 'spring' ? .55 : .8) ? pick(pal.accent, R()) : q < .45 ? pal.folLight : q < .75 ? pal.folSun : pal.folMid;
     PP.dab(x, y, (1.8 + R() * 2.6) * sz, col, { a: .9, den: .9, core: .65, s: 1.4 * U });
     return;
   }
-  const t = clamp(.5 + ((l0 + .1 + R() * .8) / 8 - .5) * (.7 + .5 * sun));   // without the sun there is less to tell light from shade
+  const l0 = lightAt(LEAF, xf - sway / PW, pf), t = clamp(.5 + (l0 + (R() - .5) * .1 - .5) * (.7 + .5 * sun));   // the wind moves the light about in them; without the sun there is less to tell light from shade
   let col = t < .28 ? mix(pal.folDeep, pal.folDark, t / .28) : t < .55 ? mix(pal.folDark, pal.folMid, (t - .28) / .27) : t < .82 ? mix(pal.folMid, pal.folLight, (t - .55) / .27) : mix(pal.folLight, pal.folSun, (t - .82) / .18 * (pal.accent ? .6 : .9));
-  if (pal.accent && l0 > 2 && q > (season === 'spring' ? .88 : .93)) col = pick(pal.accent, R());
+  if (pal.accent && l0 > .3 && q > (season === 'spring' ? .88 : .93)) col = pick(pal.accent, R());
   const sd = shadow(x, y); if (sd) col = mix(col, pal.folDeep, sd * .4);
   const a = R() * Math.PI, ca = Math.cos(a), sa = Math.sin(a), l = (2.5 + R() * 5) * sz;
   run(x, y, ca, sa, l, GREEN, Math.max(1.5, 2 * sz));
@@ -480,7 +571,7 @@ function limbStroke() {                                        // a stretch of b
 // ---------- the clearing ----------
 let groundTop = 0;
 const nearG = pf => clamp((pf - .68) / .3, .1, 1.2);           // how close the ground is at this height: the size of its strokes
-const lit = l => 5.2 + (l - 5.2) * sun;                        // under a grey sky the trees throw no shade
+const lit = t => .65 + (t - .65) * sun;                        // under a grey sky the trees throw no shade
 function groundStroke() {
   const R = PP.R, x = R() * W, y = groundTop + R() * (H - groundTop);
   if (!at(x, y)) return;
@@ -488,21 +579,21 @@ function groundStroke() {
   if (k === GRASS) paintGrass(x, y); else if (k === GRAVEL) paintGravel(x, y);
 }
 function paintGravel(x, y) {                                   // gravel, and the shade of the leaves lying on it
-  const R = PP.R, pf = zy, sz = (.3 + nearG(pf)) * U, l0 = lev, q = R(), sd = shadow(x, y);
+  const R = PP.R, pf = zy, sz = (.3 + nearG(pf)) * U, l0 = lightAt(GRAVEL, zx, pf), q = R(), sd = shadow(x, y);
   veil(.5 - nearG(pf) * .4);
-  let col = ramp(pal.gravels, (lit(l0) + R()) / 8);
+  let col = ramp(pal.gravels, lit(l0) + (R() - .5) * .12);
   if (sd) col = mix(col, pal.gravels[0], sd * .35);
   if (q < .16) { PP.dab(x, y, (.8 + R() * 1.3) * sz, mix(col, q < .08 ? pal.gravels[5] : pal.gravels[1], .35), { a: .8, den: 1, core: .5, s: 1.2 * U }); return; }   // stones
   if (season === 'autumn' && q > .975) { PP.dab(x, y, (1.3 + R() * 1.5) * sz, pick(pal.bits, R()), { a: .9, den: 1.4, core: .8, s: 1.3 * U }); return; }   // leaves
   const a = (R() - .5) * .5, ca = Math.cos(a), sa = Math.sin(a), l = (3 + R() * 8) * sz;
-  run(x, y, ca, sa, l, z => z === GRAVEL && Math.abs(lev - l0) < 2, Math.max(1.5, 1.6 * sz));
+  run(x, y, ca, sa, l, z => z === GRAVEL && Math.abs(lightAt(GRAVEL, zx, zy) - l0) < .25, Math.max(1.5, 1.6 * sz));
   PP.brush(x - ca * reach[0], y - sa * reach[0], x + ca * reach[1], y + sa * reach[1], (1.4 + R() * 2.2) * sz, col, { a: .87, jit: 7, dry: .14, sp: 1.1 * U, bow: .03 });
 }
 function paintGrass(x, y) {                                    // grass nobody mows, every blade upright
-  const R = PP.R, pf = zy, sz = (.3 + nearG(pf) * .8) * U, l0 = lev, q = R(), sd = shadow(x, y);
+  const R = PP.R, pf = zy, sz = (.3 + nearG(pf) * .8) * U, l0 = lightAt(GRASS, zx, pf), q = R(), sd = shadow(x, y);
   veil(.5 - nearG(pf) * .4);
-  let col = ramp(pal.meadow, (lit(l0) + R()) / 8);
-  if (l0 > 2) { const dry = smooth(.5, .7, fbm(x * .006 / U + 11, y * .012 / U)); if (dry > 0) col = mix(col, pal.straw, dry * .3); if (q > .92) col = mix(col, pal.straw, .4); }
+  let col = ramp(pal.meadow, lit(l0) + (R() - .5) * .12);
+  if (l0 > .35) { const dry = smooth(.5, .7, fbm(x * .006 / U + 11, y * .012 / U)); if (dry > 0) col = mix(col, pal.straw, dry * .3); if (q > .92) col = mix(col, pal.straw, .4); }
   if (sd) col = mix(col, pal.meadow[0], sd * .45);
   const a = -Math.PI / 2 + (R() - .5) * .8 + wind(time) * .07, ca = Math.cos(a), sa = Math.sin(a), l = (2 + R() * 4.5) * sz;
   run(x, y, ca, sa, l, z => z === GRASS || z === GRAVEL, Math.max(1.5, 2 * sz));
@@ -688,11 +779,11 @@ function coatStroke(x0, y0, tower, again) {                    // a fresh coat: 
     if (k === LIMB && maskAt(x, y) & 8) { veil(.05); PP.brush(x, y - l * .7, x, y + l * .7, 7 * U, mix(pal.trunk, pal.dark, .4), o); continue; }   // the trunk close by
     if (k === SKY || k === TOWER || k === THIN || k === LIMB || k === WISP) continue;
     if (k === LEAF) {
-      const near = close(zx, pf), a = (R() - .5) * 1.2, col = mix(pal.folDark, pal.folMid, .15 + lev * .09), wd = room(x, y, -Math.sin(a), Math.cos(a), 26 * U, GREEN), ll = wd < 26 * U ? l * .4 : l * .9;
+      const near = close(zx, pf), a = (R() - .5) * 1.2, col = mix(pal.folDark, pal.folMid, .15 + clamp(lightAt(LEAF, zx, pf)) * .63), wd = room(x, y, -Math.sin(a), Math.cos(a), 26 * U, GREEN), ll = wd < 26 * U ? l * .4 : l * .9;
       veil(.6 - near * .5);
       PP.brush(x - Math.cos(a) * ll, y - Math.sin(a) * ll, x + Math.cos(a) * ll, y + Math.sin(a) * ll, wd, col, o);
     } else if (k === THICKET) { veil(.6); PP.brush(x - l, y, x + l, y, 18 * U, mix(mix(pal.skyLow, pal.haze, .5), pal.twigs[1], .55), o); }
-    else { veil(.5 - nearG(pf) * .4); PP.brush(x - l, y, x + l, y, 18 * U, k === GRASS ? ramp(pal.meadow, (lit(lev) + .5) / 8) : ramp(pal.gravels, (lit(lev) + .5) / 8), o); }
+    else { veil(.5 - nearG(pf) * .4); PP.brush(x - l, y, x + l, y, 18 * U, ramp(k === GRASS ? pal.meadow : pal.gravels, lit(lightAt(k, zx, pf))), o); }
   }
 }
 
@@ -759,9 +850,9 @@ const place = {
     const above = p => p[1] < tops[clamp(p[0] | 0, 0, n - 1)];
     skyA = 0; while (skyA < OUT.length - 1 && !above(OUT[skyA])) skyA++;
     skyB = OUT.length - 1; while (skyB > skyA && !above(OUT[skyB])) skyB--;
-    buildTrees();
+    buildWood(); buildTrees();
   },
-  tick(t) { time = t; },
+  tick(t) { time = t; sway = wind(t) * 1.5 * U; },
   top(x) { return tops[x < 0 ? 0 : x >= tops.length ? tops.length - 1 : x | 0] - U; },
   sky(c, pad) {                                                // down to where the wood is dense, and round the tower
     const dip = 3 * U - pad, n = tops.length, g = x => tops[x < 0 ? 0 : x >= n ? n - 1 : x | 0] + dip;
