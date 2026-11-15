@@ -5,11 +5,12 @@
  *  is never cleared.  Every frame a few dozen dry-brush strokes and
  *  chalk dabs are sampled from the scene as it is right now (drifting
  *  clouds, their shadows, wind in the leaves, the palette of the
- *  season) and laid over whatever is already there.  A new season, day
- *  turning into night or another place is first a wash of broad swaths
- *  that cleans the old picture away, then a fresh coat brushed across
- *  it close behind.  Only the few things that really move are redrawn
- *  from scratch each frame, on a second canvas on top.
+ *  season) and laid over whatever is already there.  Another place is
+ *  first a wash of broad swaths that cleans the old picture away, then
+ *  a fresh coat brushed across it close behind; a new season, weather
+ *  or hour of the same place gets only the coat, straight over the old.
+ *  Only the few things that really move are redrawn from scratch each
+ *  frame, on a second canvas on top.
  *
  *  This file has the paint box, the seasons, the weather and the sky.
  *  What is under the sky is a place: one file each in places/, loaded
@@ -754,7 +755,10 @@ function light(x, y, r) { PP.dab(x, y, r, pick(pal.lights, PP.R()), { a: 1, den:
 // either all the way down or, below the horizon, a muted ground for the land to be painted on.
 const DIRS = [[-1, .3], [1, .3], [-1, -.3], [.3, 1], [1, -.3]];
 const WASH_ASKED = ['sky', 'ground'].includes(qs.get('wash')) ? qs.get('wash') : null;
-function startCoat(dur) {
+// The same place in another season, weather or hour needs no wash: the coat goes straight over the old
+// picture, which keeps being painted ahead of it.  ?wash=always washes it all the same.
+const OVERPAINT = qs.get('wash') !== 'always';
+function startCoat(dur, over) {
   const r = rng(17 + coatN), [ax, ay] = DIRS[coatN++ % DIRS.length], dl = Math.hypot(ax, ay);
   const cw = 62 * U, ch = 38 * U, cells = [];
   let lo = 1e9, hi = -1e9;
@@ -780,7 +784,10 @@ function startCoat(dur) {
   // the coat keeps that far behind the wash, the old picture that far ahead of it.
   const reach = (wl * Math.abs(ax) + ww / 2 * Math.abs(ay)) * 1.08 + 24 * U, stroke = 130 * U * dl;
   const lead = reach + stroke;
-  coat = {
+  coat = over ? {                                              // no wash: the old picture reaches right up to the coat
+    cells, i: 0, washCells: [], wi: 0, t0: time, dur, ax, ay, lo, hi: hi + J, lead, ahead: -lead,
+    s0: lo + lead, s1: hi + J + lead, wash: -1e9, front: -1e9, over: true,
+  } : {
     cells, i: 0, washCells: wash, wi: 0, t0: time, dur, ax, ay, lo, hi: hi + J, lead, ahead: reach + stroke,
     s0: Math.min(wlo, lo + lead), s1: Math.max(whi, hi + J + lead), wash: -1e9, front: -1e9,
     ground: (WASH_ASKED || (r() < .5 ? 'sky' : 'ground')) === 'ground',
@@ -1060,8 +1067,10 @@ function show(dur) {
   remember();
   announce();
   if (cur.place === place && cur.season === season && cur.weather === weather && cur.night === isNight) return;
+  // Overpainted only over a finished picture of this place (or one being overpainted), not while a wash is still going.
+  const over = OVERPAINT && cur.place === place && (!coat || coat.over);
   old = cur; cur = mkScene(place, season, weather, isNight);
-  startCoat(REDUCED ? 0 : dur);
+  startCoat(REDUCED ? 0 : dur, over);
 }
 function turn(season, advance) {                               // go to a season, to its next weather if asked
   const list = WEATHERS[SEASONS[season]];
