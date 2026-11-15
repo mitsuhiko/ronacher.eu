@@ -11,8 +11,8 @@
  *  cone and the flag where they are on it, the bushes as a heap of
  *  crowns.  On it children looked out of the window and a girl stood
  *  in the bushes: the window is empty and dark, and nobody is about.
- *  The photograph is an upright one: the clearing a wide screen shows
- *  to the left of it, its trees and the wood behind them, is made up.
+ *  The photograph is an upright one: the trees a wide screen shows to
+ *  the left and right of it, and the wood behind them, are made up.
  *  The flag flies as the wind blows, and at night somebody has left a
  *  lantern burning in the window.
  *  scene.js paints the sky and says what a place has to bring along.
@@ -36,8 +36,8 @@ const at = (x, y) => { const s = kit.at(x, y, place); return s && use(s); };   /
 
 // ---------- geometry ----------
 // Everything is measured on the photograph: x and y as fractions of its width and height.  It is an upright one:
-// a narrow screen shows a slice of its width, a wide one a slice of its height and the clearing that lies to its
-// left (see layout).
+// a narrow screen shows a slice of its width, a wide one a slice of its height and the trees that stand to its
+// left and right (see layout).
 let X0 = 0, Y0 = 0;
 const px = f => (f - X0) * PW, py = f => (f - Y0) * PH, fx = x => X0 + x / PW, fy = y => Y0 + y / PH;
 function along(pts, x) {                                       // a line through points
@@ -154,20 +154,23 @@ for (const t of [[.335, .022, .012, .275, .17, .04, 0], [.205, .055, .012, .205,
 // one that is closer to where its bush stands.
 const SHRUB = [[.1, .94]], TREE = [[.75, 1.02], [.735, .85], [.72, .7], [.705, .55], [.695, .42], [.705, .3], [.73, .18]];
 const BRIAR = [[.27, .7]], TWINE = [[.705, .56]], SPRAYS = [[.3, 1.03], [.47, 1.04], [.62, 1.03], [.76, 1.02]];
-// Beyond the photograph lies the clearing, and that is made up: trees stand round it, [x, where the crown is, how
-// big it is, where its foot is], a wood closes it off far behind them.  The elder goes on to the right.
-const TREES = [[-.27, .52, .2, .9], [-.13, .75, .13, .93], [-.66, .41, .16, .83], [-1.1, .2, .34, .9], [-1.64, .32, .25, .85], [-2.06, .45, .15, .81], [-2.56, .2, .34, .9], [-3.1, .36, .22, .84], [-3.6, .22, .32, .9]];
+// Beyond the photograph, on either side, there are more trees, and they are made up: [x, where the crown is, how
+// big it is, where its foot is].  Bare ground lies under them, and a wood closes it off far behind.
+const TREES = [[-.19, .4, .2, .9], [-.1, .6, .12, .93], [-.09, .77, .11, .93], [-.43, .27, .22, .88], [-.62, .5, .14, .84], [-.8, .3, .2, .87], [-1, .42, .17, .85],
+  [1.2, .38, .2, .9], [1.11, .6, .12, .93], [1.1, .78, .11, .93], [1.43, .27, .22, .88], [1.62, .48, .14, .84], [1.82, .3, .2, .87], [2.02, .42, .17, .85]];
 const DENSE = [[0, .27], [.3, .33], [.45, .34], [.6, .34], [.75, .37], [1, .3]];
 const farTop = xf => .49 + (vnoise(xf * 3.1, 1.7) - .5) * .12 + (vnoise(xf * 14, 4.2) - .5) * .04;
-const here = xf => smooth(-.12, -.03, xf);                     // 1 on the photograph, among the bushes round the hut; 0 out in the clearing
-// The bushes on the photograph's left end in a big round one just beyond it: where its top is, and how deep inside it a point is
-const dome = xf => xf > -.17 ? DENSE[0][1] + (1 - Math.sqrt(1 - xf * xf / .0289)) * .45 : 9;
-const within = (xf, pf) => xf >= 0 ? 1 : xf < -.17 ? 0 : smooth(-.015, .02, pf - dome(xf) - (vnoise(pf * 40, xf * 30) - .5) * .03);
+const out = xf => xf < 0 ? -xf : xf > 1 ? xf - 1 : 0;          // how far beyond the photograph a point lies
+const here = xf => smooth(.12, .03, out(xf));                  // 1 on the photograph, among the bushes round the hut; 0 out among the trees
+// The bushes on the photograph end in a big round one just beyond it on either side: where its top is, and how deep
+// inside it a point is
+function dome(xf) { const d = out(xf); return d < .17 ? DENSE[xf < 0 ? 0 : DENSE.length - 1][1] + (1 - Math.sqrt(1 - d * d / .0289)) * .45 : 9; }
+function within(xf, pf) { const d = out(xf); return !d ? 1 : d >= .17 ? 0 : smooth(-.015, .02, pf - dome(xf) - (vnoise(pf * 40, xf * 30) - .5) * .03); }
 function dense(xf) {                                           // below it no sky is to be seen between the trees, leaves or no leaves
-  const y = xf > 1 ? -.3 : xf >= 0 ? along(DENSE, xf) : Math.min(farTop(xf), dome(xf));
+  const y = out(xf) ? Math.min(farTop(xf), dome(xf)) : along(DENSE, xf);
   return y + (vnoise(xf * 30, 5.5) - .5) * .03 + (vnoise(xf * 110, 2.5) - .5) * .01;
 }
-const groundTop = xf => .895 - .14 * smooth(-.1, -.55, xf) + (vnoise(xf * 7, 3.3) - .5) * .035;
+const groundTop = xf => .895 - .115 * smooth(.02, .22, out(xf)) + (vnoise(xf * 7, 3.3) - .5) * .035;
 let gCell = 3, gCols = 0, gRows = 0, backQ = null, backK = null, backV = null, frontQ = null, frontK = null, frontV = null;
 let limbs = [], limbSum = null, stoutN = 0, stoutLength = 0, limbLength = 0, mask = null, mCols = 0, mRows = 0, mCell = 2;
 const limbX = (s, t) => (1 - t) * (1 - t) * s.x1 + 2 * t * (1 - t) * s.cx + t * t * s.x2;
@@ -182,7 +185,7 @@ function buildWood() {
   // what stands beyond the photograph: a tree is a heap of crowns round the middle of its own
   const far = [], stands = [];
   TREES.forEach((t, i) => {
-    if (t[0] + t[2] < x0) return;
+    if (t[0] + t[2] < x0 || t[0] - t[2] > x1) return;
     const r = rng(1000 + i), kind = i % 3 === 2 ? ELDER : BUSH, crowns = [];
     for (let n = 6 + Math.round(t[2] * 70); n > 0; n--) {
       const a = r() * TAU, d = Math.sqrt(r()) * .78;
@@ -190,10 +193,6 @@ function buildWood() {
     }
     far.push(...crowns); stands.push([t, crowns, 30 + i]);
   });
-  for (let i = 0; 1.04 + i * .06 < x1; i++) {
-    const r = rng(1500 + i), xf = 1.04 + i * .06;
-    for (let y = -.04; y < 1.05; y += .08 + r() * .04) far.push([xf + (r() - .5) * .05, y, .08 + r() * .04, y > .85 ? ASH : ELDER]);
-  }
   const stamp = (Q, K, V, c) => {
     const cx = px(c[0]), cy = py(c[1]), r = c[2] * PW;
     const i0 = Math.max(0, Math.floor((cx - r) / gCell)), i1 = Math.min(gCols - 1, Math.ceil((cx + r) / gCell)), j0 = Math.max(0, Math.floor((cy - r) / gCell)), j1 = Math.min(gRows - 1, Math.ceil((cy + r) / gCell));
@@ -519,7 +518,7 @@ function groundStroke(x, y) {                                  // bare earth, tr
     PP.brush(x - (q < .45 ? l : 0), y, x + Math.cos(a) * l, y + Math.sin(a) * l, (q < .45 ? 2.4 : 1 + R()) * sz, col, { a: .87, jit: 8, dry: .15, sp: 1.1 * U, bow: .2 });
     return;
   }
-  let col = ramp(pal.soil, .25 + fbm(xf * 9 + 4, pf * 40) * .9 + (R() - .5) * .25 + (1 - here(xf)) * .25 - smooth(.03, 0, pf - top) * .3);   // out in the clearing the light falls on it
+  let col = ramp(pal.soil, .25 + fbm(xf * 9 + 4, pf * 40) * .9 + (R() - .5) * .25 + (1 - here(xf)) * .25 - smooth(.03, 0, pf - top) * .3);   // out among the trees the light falls on it
   if (wet) col = mix(mix(col, pal.soil[0], .3), pal.skyLow, .12 + R() * .12);
   if (sd) col = mix(col, pal.soil[0], sd * .4);
   run(x, y, 1, 0, (3 + R() * 8) * sz, same, 2 * U);
@@ -661,14 +660,14 @@ const place = {
   hz: 0,
   layout(v) {
     W = v.W; H = v.H; U = v.U;
-    // An upright screen shows the photograph from top to bottom, and of its width what there is room for, the hut in
-    // the middle.  A wide one loses some of its sky and of the foot of the cone; the hut stands on the right then,
-    // and the clearing lies to the left of it.  A very wide one comes closer.
+    // The hut stands in the middle.  An upright screen shows the photograph from top to bottom, and of its width
+    // what there is room for.  A wide one loses a little of its sky and the foot of the cone, and shows the trees
+    // that stand to the left and right of it.  A very wide one comes closer.
     const wide = clamp((W / H - .75) / .6);
     let shown = .97 - .1 * wide;
-    Y0 = .012 + .068 * wide; PH = H / shown; PW = PH * .75;
-    if (W / PW > 2.5) { PW = W / 2.5; PH = PW / .75; shown = H / PH; Y0 = .08 + (.87 - shown) * .18; }
-    X0 = HMID - (.5 + .32 * wide) * W / PW;
+    Y0 = .012 + .03 * wide; PH = H / shown; PW = PH * .75;
+    if (W / PW > 2.5) { PW = W / 2.5; PH = PW / .75; shown = H / PH; Y0 = .06 + (.87 - shown) * .3; }
+    X0 = HMID - .5 * W / PW;
     if (W < PW) X0 = clamp(X0, 0, 1 - W / PW);
     place.hz = py(.5);
     poleMin = Math.max(.0022, .8 * U / PW);
@@ -696,8 +695,8 @@ const place = {
     c.lineTo(0, y); c.closePath();
   },
   front(s, x, y) { use(s); return zone(x, y) !== SKY; },       // leaves, limbs and the flag's pole stand in front of the sky
-  orb(o) {                                                     // the sun and the moon stand where the sky is open: over the clearing, or beside the flag
-    o.x = clamp(px(X0 < -.62 ? -.44 : .405), o.r * 1.6, W - o.r * 1.6);
+  orb(o) {                                                     // the sun and the moon stand where the sky is open: between the trees on the left, or beside the flag
+    o.x = clamp(px(X0 < -.3 ? -.13 : .405), o.r * 1.6, W - o.r * 1.6);
     let clear = 1e9;
     for (let i = Math.max(0, (o.x - o.r * 1.3) | 0); i < Math.min(open.length, o.x + o.r * 1.3); i++) clear = Math.min(clear, open[i]);
     o.y = Math.max(o.r * 1.3, Math.min(o.y, clear - o.r * 1.5));
