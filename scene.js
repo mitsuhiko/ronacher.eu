@@ -349,6 +349,8 @@ const CLOUDS = {
 
 // ---------- view state (CSS pixels) ----------
 let W = 0, H = 0, SCALE = 1, U = 1;         // U: stroke unit, so a phone gets the same picture as a desktop
+// and a big screen bigger strokes rather than ever more of them, up to a point.  ?ucap= moves that point.
+const UCAP = parseFloat(qs.get('ucap')) || 2;
 let HZ = 0, skyH = 0;                       // the horizon of the picture last looked at, the lowest one there is right now
 let time = 0;
 
@@ -495,7 +497,22 @@ const VP = new Painter(sctx, 1);                      // whatever floats over it
     d[i] = d[i + 1] = d[i + 2] = v; d[i + 3] = 255;
   }
   x.putImageData(id, 0, 0);
-  try { root.style.setProperty('--grain', `url(${g.toDataURL('image/png')})`); } catch (e) { /* ignore */ } }
+  try { root.style.setProperty('--grain', `url(${g.toDataURL('image/png')})`); } catch (e) { /* ignore */ }
+  // Over the picture the same grain is laid on plainly, as specks of white and black: blended (overlay) it would
+  // have to be worked out anew for the whole window every frame.  Each speck is as strong as overlay makes it
+  // on the tones it mostly falls on: by day light ones, on which it darkens little, by night dark ones, on
+  // which it lightens little.  ?grain=overlay blends it as before.
+  for (const [name, op, up, down] of [['--grain-day', .5, 1, .3], ['--grain-night', .32, .3, 1]]) {
+    const o = x.createImageData(n, n), q = o.data;
+    for (let i = 0; i < d.length; i += 4) {
+      const e = d[i] / 255 - .5, light = e > 0;
+      q[i] = q[i + 1] = q[i + 2] = light ? 255 : 0;
+      q[i + 3] = Math.round(255 * Math.min(1, 2 * op * Math.abs(e) * (light ? up : down)));
+    }
+    x.putImageData(o, 0, 0);
+    try { root.style.setProperty(name, `url(${g.toDataURL('image/png')})`); } catch (e) { /* ignore */ }
+  }
+  root.classList.toggle('grain-overlay', qs.get('grain') === 'overlay'); }
 
 // ---------- scenes: the picture as it is, and the one it was ----------
 let cur = null, old = null, coat = null, boostUntil = 0, coatN = 0;
@@ -798,6 +815,8 @@ function runCoat() {
 const RATE = { sky: 900, cloud: 1100, star: 260, moon: 70 };
 const budget = {};
 let quality = 1;
+// Once a picture is painted in, its land is kept fresh at this share of the pace it was painted in at.  ?settle=1 keeps it at full pace.
+const SETTLE = qs.has('settle') ? clamp(parseFloat(qs.get('settle')) || 0, .05, 1) : .5;
 function spend(key, amount, fn) {
   budget[key] = Math.min(500, (budget[key] || 0) + amount);
   while (budget[key] >= 1) { budget[key]--; fn(); }
@@ -805,8 +824,11 @@ function spend(key, amount, fn) {
 function paint(dt) {
   runCoat();
   const ua = U * U * 1e6, anyNight = cur.night || (old && old.night);
-  let pace = dt * quality * (REDUCED && time > boostUntil ? .3 : 1);
-  if (time < boostUntil) pace *= 3;
+  let pace = dt * quality;
+  if (time < boostUntil) pace *= 3;                            // a fresh picture is painted in quickly
+  else if (REDUCED) pace *= .3;
+  // Then the land is only kept fresh.  The sky is not: it is few strokes, and the clouds drifting over it would leave trails.
+  const land = time < boostUntil || REDUCED ? 1 : 1 - (1 - SETTLE) * smooth(boostUntil + 4, boostUntil + 12, time);
   const other = old && old.place !== cur.place ? old.place : null;   // going somewhere else: for a while there are two places
   skyH = other ? Math.max(cur.place.hz, other.hz) : cur.place.hz;
   const skyA = W * skyH / ua;
@@ -816,9 +838,9 @@ function paint(dt) {
   if (anyNight) spend('star', RATE.star * skyA * pace, starDab);
   if (cur.orb || (old && old.orb)) spend('moon', RATE.moon * pace, orbDab);
   pctx.restore();
-  if (!other) { cur.place.paint(pace, cur, old); return; }
-  cur.place.paint(pace * .6, cur, null);
-  other.paint(pace * .6, null, old);
+  if (!other) { cur.place.paint(pace * land, cur, old); return; }
+  cur.place.paint(pace * land * .6, cur, null);
+  other.paint(pace * land * .6, null, old);
 }
 
 // ---------- things that float over the picture ----------
@@ -978,7 +1000,7 @@ function resize() {
     if (had) { pctx.setTransform(1, 0, 0, 1, 0, 0); pctx.drawImage(scratch, 0, 0, pw, ph); scratch.width = scratch.height = 1; }
   }
   W = w; H = h; SCALE = scale;
-  U = clamp(Math.min(w, h) / 800, .55, 1.5);
+  U = clamp(Math.min(w, h) / 800, .55, UCAP);
   pctx.setTransform(scale, 0, 0, scale, 0, 0); pctx.lineCap = pctx.lineJoin = 'round';
   if (!had) {
     cur = mkScene(fit(places[placeIndex]), SEASONS[seasonIndex], weather, wantNight());
@@ -1050,8 +1072,11 @@ function step(dt, draw) {
   paint(dt);
   if (draw) drawSprites();
 }
-let last = performance.now(), cost = 8;
-const GAP = REDUCED ? 120 : 31;
+// Twenty frames a second are plenty for a painting: how many strokes go on in a second does not depend on
+// it, only how often the window has to be put together anew.  ?fps= asks for another pace.
+const FPS = parseFloat(qs.get('fps')) || (REDUCED ? 8 : 20), FRAME = 1000 / FPS;
+const GAP = FRAME - 5;                                         // a little early, so a frame of the screen's never makes us skip one
+let last = performance.now(), cost = FRAME * .25;
 function frame(now) {
   requestAnimationFrame(frame);
   if (now - last < GAP) return;
@@ -1059,7 +1084,7 @@ function frame(now) {
   const t0 = performance.now();
   step(dt, true);
   cost += (performance.now() - t0 - cost) * .05;               // slow machines get fewer fresh strokes
-  if (cost > 16) quality = Math.max(.3, quality * .97); else if (cost < 9) quality = Math.min(1, quality * 1.01);
+  if (cost > FRAME * .48) quality = Math.max(.3, quality * .97); else if (cost < FRAME * .27) quality = Math.min(1, quality * 1.01);
 }
 window.addEventListener('resize', resize);
 resize();

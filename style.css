@@ -69,13 +69,22 @@ body {
 }
 
 .grain {
-  background-image: var(--grain);
+  background-image: var(--grain-day);
   background-size: 256px 256px;
+}
+
+html.night .grain {
+  background-image: var(--grain-night);
+}
+
+/* ?grain=overlay: blended, as it was; dearer, the whole window is worked out anew every frame */
+html.grain-overlay .grain {
+  background-image: var(--grain);
   mix-blend-mode: overlay;
   opacity: 0.5;
 }
 
-html.night .grain {
+html.grain-overlay.night .grain {
   opacity: 0.32;
 }
 
