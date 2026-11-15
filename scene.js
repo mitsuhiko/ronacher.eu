@@ -555,9 +555,12 @@ function mkScene(place, season, name, isNight) {
 function use(s) { pal = s.pal; clouds = s.clouds; night = s.night; traits = s.traits; orb = s.orb; place = s.place; HZ = place.hz; return s; }
 // While a coat is being brushed across, everything well ahead of the wash still belongs to the old picture,
 // and what the wash has cleaned but the coat not reached yet belongs to none: nothing is painted there.
+// And while paint() does the sky of one of two pictures, the other one is none.
+let only = null;
 function sceneAt(x, y) {
   let s = cur;
   if (coat) { const k = x * coat.ax + y * coat.ay; if (k > coat.wash + coat.ahead) s = old; else if (k > coat.front) s = null; }
+  if (only && s !== only) s = null;
   return s ? use(s) : null;
 }
 
@@ -888,12 +891,19 @@ function paint(dt) {
   const other = old && old.place !== cur.place ? old.place : null;   // going somewhere else: for a while there are two places
   skyH = other ? Math.max(cur.place.hz, other.hz) : cur.place.hz;
   const skyA = W * skyH / ua;
-  clipSky(3 * U, cur.place, other);
-  spend('sky', RATE.sky * skyA * (cur.night ? .45 : 1) * pace, skyStreak);
-  spend('cloud', RATE.cloud * skyA * cur.traits.cloudy * pace, cloudDab);
-  if (anyNight) spend('star', RATE.star * skyA * pace, starDab);
-  if (cur.orb || (old && old.orb)) spend('moon', RATE.moon * pace, orbDab);
-  pctx.restore();
+  // Going somewhere else, each picture's sky is painted within its own place's, the one after the other: the sky of
+  // one place is not the other's, and kept to where both have sky, a picture's clouds would stand still (and its
+  // sky stay bare) where only its own place has any, until the coat is done.
+  for (const [s, p, tag] of other ? [[cur, cur.place, ''], [old, other, '-old']] : [[null, cur.place, '']]) {
+    only = s;
+    clipSky(3 * U, p);
+    spend('sky' + tag, RATE.sky * skyA * (cur.night ? .45 : 1) * pace, skyStreak);
+    spend('cloud' + tag, RATE.cloud * skyA * cur.traits.cloudy * pace, cloudDab);
+    if (anyNight) spend('star' + tag, RATE.star * skyA * pace, starDab);
+    if (cur.orb || (old && old.orb)) spend('moon' + tag, RATE.moon * pace, orbDab);
+    pctx.restore();
+  }
+  only = null;
   if (!other) { cur.place.paint(pace * land, cur, old); return; }
   cur.place.paint(pace * land * .6, cur, null);
   other.paint(pace * land * .6, null, old);
