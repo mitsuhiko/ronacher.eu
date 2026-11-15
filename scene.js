@@ -1070,9 +1070,15 @@ function turn(season, advance) {                               // go to a season
   weather = list[weatherAt[season]];
 }
 function nextWeather() { turn(seasonIndex, true); show(3.5); }
+function prevWeather() {
+  const list = WEATHERS[SEASONS[seasonIndex]];
+  weatherAt[seasonIndex] = (Math.max(0, weatherAt[seasonIndex]) + list.length - 1) % list.length;
+  weather = list[weatherAt[seasonIndex]];
+  show(3.5);
+}
 function nextSeason() { turn((seasonIndex + 1) % SEASONS.length, false); show(4.5); }
-function nextPlace() {
-  placeIndex = (placeIndex + 1) % places.length;
+function nextPlace(dir) {
+  placeIndex = (placeIndex + (dir < 0 ? places.length - 1 : 1)) % places.length;
   show(4.5);
 }
 function pickScene() {
@@ -1143,13 +1149,18 @@ Object.assign(window.vienna, { choices, labels, choose, pause(on) { paused = !!o
 paintCv.addEventListener('click', e => { if (e.clientX < innerWidth / 2) back(); else forward(); });
 document.addEventListener('keydown', e => {
   if (paused || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
-  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  // left and right go back and on along the way the pictures went, up and down through the weathers of
+  // the season, page up and down through the places, and space on to the next season
+  const keys = { ArrowRight: forward, ArrowLeft: back, ArrowDown: nextWeather, ArrowUp: prevWeather,
+    PageDown: () => nextPlace(1), PageUp: () => nextPlace(-1), ' ': nextSeason };
+  if (!Object.prototype.hasOwnProperty.call(keys, e.key)) return;
   const t = e.target;
   if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  if (e.key === ' ' && t && t.closest && t.closest('button, a, summary')) return;   // space presses what has the focus
   e.preventDefault();
-  if (e.key === 'ArrowRight') forward(); else back();
+  keys[e.key]();
 });
-if (placeButton) placeButton.addEventListener('click', nextPlace);
+if (placeButton) placeButton.addEventListener('click', () => nextPlace(1));
 if (seasonButton) seasonButton.addEventListener('click', nextSeason);
 if (weatherButton) weatherButton.addEventListener('click', nextWeather);
 
