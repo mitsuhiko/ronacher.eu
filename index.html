@@ -10,6 +10,8 @@
   try { m = localStorage.getItem('ronacher-theme') || 'auto'; } catch (e) {}
   var q = /[?&]theme=(\w+)/.exec(location.search); if (q) m = q[1];
   d.classList.add('js');
+  var c = /[?&]card=(\w+)/.exec(location.search);
+  d.classList.add('card-' + (c && /^(peek|flip|center)$/.test(c[1]) ? c[1] : 'peek'));
   if (m === 'night' || (m !== 'day' && window.matchMedia && matchMedia('(prefers-color-scheme: dark)').matches)) d.classList.add('night');
 })();
 </script>
@@ -46,15 +48,16 @@
       </p>
     </div>
     <ul class="address write">
-      <li>Read my <a href="https://lucumr.pocoo.org/">Technology Blog</a></li>
-      <li>or my <a href="https://dark.ronacher.eu/">Darker Thoughts</a></li>
-      <li>Follow me as <a href="https://bsky.app/profile/mitsuhiko.at">@mitsuhiko.at</a> on Bluesky</li>
-      <li>or <a href="https://twitter.com/@mitsuhiko">mitsuhiko</a> on Twitter/X</li>
-      <li>Find me as <a href="https://github.com/mitsuhiko">mitsuhiko</a> on GitHub</li>
-      <li>You can also <a href="https://github.com/sponsors/mitsuhiko">sponsor me</a></li>
-      <li>Or <a href="mailto:armin.ronacher@active-4.com">send me an email</a></li>
-      <li>Or <a href="https://lucumr.pocoo.org/about/">learn more about me</a></li>
+      <li><span class="lead">Read my </span><a href="https://lucumr.pocoo.org/">Technology Blog</a></li>
+      <li><span class="lead">or my </span><a href="https://dark.ronacher.eu/">Darker Thoughts</a></li>
+      <li><span class="lead">Follow me as </span><a href="https://bsky.app/profile/mitsuhiko.at">@mitsuhiko.at</a><span class="via"><span class="lead"> on</span> Bluesky</span></li>
+      <li><span class="lead">or </span><a href="https://twitter.com/@mitsuhiko">mitsuhiko</a><span class="via"><span class="lead"> on</span> Twitter/X</span></li>
+      <li><span class="lead">Find me as </span><a href="https://github.com/mitsuhiko">mitsuhiko</a><span class="via"><span class="lead"> on</span> GitHub</span></li>
+      <li><span class="lead">You can also </span><a href="https://github.com/sponsors/mitsuhiko">sponsor me</a></li>
+      <li><span class="lead">Or </span><a href="mailto:armin.ronacher@active-4.com">send me an email</a></li>
+      <li><span class="lead">Or </span><a href="https://lucumr.pocoo.org/about/">learn more about me</a></li>
     </ul>
+    <button class="card-turn" type="button"><span class="turn-to-links">turn over for the addresses</span><span class="turn-to-message">turn back to the message</span> <svg viewBox="0 0 20 12" aria-hidden="true"><path d="M1.5,6.4 C6,5.4 11,6.8 17.6,5.9 M13.6,2.2 C15,3.6 16.4,4.8 17.9,5.9 C16.3,7 14.9,8.3 13.4,9.8"/></svg></button>
   </article>
 </main>
 <button id="card-open" class="mini-card" type="button" hidden aria-label="Show the postcard again">

@@ -57,7 +57,38 @@ function skip() {                                              // impatient? a c
   card.classList.add('in');
   finishWriting();
 }
-card.addEventListener('click', e => { if (!card.classList.contains('written') && !e.target.closest('a, button')) skip(); });
+card.addEventListener('click', e => {
+  if (e.target.closest('a, button')) return;
+  if (!card.classList.contains('written')) skip();
+  if (peeking()) pullUp();
+});
+
+// ---------- small screens: the card tucked in at the foot of the picture (?card=peek, the default) ----------
+const root = document.documentElement;
+const SMALL = window.matchMedia ? matchMedia('only screen and (max-width: 700px), only screen and (max-height: 500px)') : { matches: false };
+const PEEK = root.classList.contains('card-peek');
+const SMOOTH = REDUCED ? 'auto' : 'smooth';
+function peeking() { return PEEK && SMALL.matches && card.getBoundingClientRect().bottom > window.innerHeight + 4; }
+function pullUp() { window.scrollTo({ top: root.scrollHeight, behavior: SMOOTH }); }
+
+// ---------- ?card=flip: the message on one side, the addresses on the other ----------
+const turnButton = card.querySelector('.card-turn');
+let turning = false;
+function turnOver() {
+  if (turning) return;
+  const turned = !card.classList.contains('turned');
+  const swap = () => card.classList.toggle('turned', turned);
+  if (REDUCED || !card.animate) { swap(); return; }
+  const tilt = getComputedStyle(root).getPropertyValue('--tilt').trim() || '0deg';
+  const at = deg => `perspective(1200px) rotate(${tilt}) rotateY(${deg}deg)`;
+  const dir = turned ? 1 : -1;
+  turning = true;
+  card.animate([{ transform: at(0) }, { transform: at(90 * dir) }], { duration: 210, easing: 'cubic-bezier(.5, 0, .9, .6)' }).finished.then(() => {
+    swap();
+    return card.animate([{ transform: at(-90 * dir) }, { transform: at(0) }], { duration: 300, easing: 'cubic-bezier(.15, .5, .4, 1)' }).finished;
+  }).finally(() => { turning = false; });
+}
+if (turnButton) turnButton.addEventListener('click', turnOver);
 
 // ---------- putting the card away, to look at the picture, and taking it out again ----------
 const closeButton = card.querySelector('.card-close'), openButton = document.getElementById('card-open');
@@ -67,6 +98,10 @@ function setOpen(open, focus) {
   card.classList.toggle('closed', !open);
   card.inert = !open; card.setAttribute('aria-hidden', String(!open));
   if (openButton) openButton.hidden = open;
+  if (PEEK) {                                                  // away: back to the picture; out again: all of it
+    root.classList.toggle('card-away', !open);
+    if (SMALL.matches) { if (open) setTimeout(pullUp, 60); else window.scrollTo({ top: 0, behavior: SMOOTH }); }
+  }
   if (focus) { const target = open ? closeButton : openButton; if (target) target.focus({ preventScroll: true }); }
 }
 if (closeButton) closeButton.addEventListener('click', () => setOpen(false, true));
