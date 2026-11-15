@@ -1020,17 +1020,29 @@ function resize() {
 // ---------- seasons, day and night ----------
 // Every minute the picture is painted over with another one: another place, in another
 // season and weather.  Every place in every season and weather comes round once, in an
-// order of chance, before any of them comes again; the buttons and a click on the picture
-// go straight to the next one.  ?seed= makes the order the same every time.
+// order of chance, before any of them comes again; the buttons go straight to the next one,
+// and the arrow keys or a click on the picture go back and on (the left half back, the rest on).  ?seed= makes the order the same every time.
 let seasonClock = 0, paused = false;
 const sceneKey = (p, s, w) => p + '/' + s + '/' + w;
 const ALL_SCENES = [];
 for (let p = 0; p < places.length; p++) for (let s = 0; s < SEASONS.length; s++) for (const w of WEATHERS[SEASONS[s]]) ALL_SCENES.push({ p, s, w });
 const seen = new Set([sceneKey(placeIndex, seasonIndex, weather)]);   // what has been shown since the last round began
+// The way the pictures went, so the arrow keys (and a tap on the left of the picture) can go back along it
+// and on again; going on past its end is a new one of chance, and so is going back before its start.
+const trail = [{ p: placeIndex, s: seasonIndex, w: weather }];
+let at = 0, retracing = false;
+function remember() {
+  const here = trail[at];
+  if (retracing || (here.p === placeIndex && here.s === seasonIndex && here.w === weather)) return;
+  trail.length = at + 1;
+  trail.push({ p: placeIndex, s: seasonIndex, w: weather }); at++;
+  if (trail.length > 200) { trail.shift(); at--; }
+}
 function show(dur) {
   const season = SEASONS[seasonIndex], isNight = wantNight(), place = fit(places[placeIndex]);
   seasonClock = 0;
   seen.add(sceneKey(placeIndex, seasonIndex, weather));
+  remember();
   announce();
   if (cur.place === place && cur.season === season && cur.weather === weather && cur.night === isNight) return;
   old = cur; cur = mkScene(place, season, weather, isNight);
@@ -1048,17 +1060,36 @@ function nextPlace() {
   placeIndex = (placeIndex + 1) % places.length;
   show(4.5);
 }
-function nextScene() {
+function pickScene() {
   // Rather somewhere else in another season, then somewhere else at all, then anything not yet seen.
   let left = ALL_SCENES.filter(c => !seen.has(sceneKey(c.p, c.s, c.w)));
   if (!left.length) { seen.clear(); seen.add(sceneKey(placeIndex, seasonIndex, weather)); left = ALL_SCENES.filter(c => !seen.has(sceneKey(c.p, c.s, c.w))); }
   const away = left.filter(c => c.p !== placeIndex || places.length < 2);
   const apart = away.filter(c => c.s !== seasonIndex);
-  const next = pick(apart.length ? apart : away.length ? away : left, ROLL());
+  return pick(apart.length ? apart : away.length ? away : left, ROLL());
+}
+function setScene(c) {
+  placeIndex = c.p; seasonIndex = c.s; weather = c.w;
+  weatherAt[c.s] = WEATHERS[SEASONS[c.s]].indexOf(c.w);
+}
+function nextScene() {
+  const next = pickScene();
   if (!next) return;
-  placeIndex = next.p; seasonIndex = next.s; weather = next.w;
-  weatherAt[next.s] = WEATHERS[SEASONS[next.s]].indexOf(next.w);
+  setScene(next);
   show(4.5);
+}
+function retrace(i) {
+  at = i; setScene(trail[i]);
+  retracing = true; show(4.5); retracing = false;
+}
+function forward() { if (at < trail.length - 1) retrace(at + 1); else nextScene(); }
+function back() {
+  if (at > 0) { retrace(at - 1); return; }
+  const before = pickScene();
+  if (!before) return;
+  trail.unshift({ p: before.p, s: before.s, w: before.w });
+  if (trail.length > 200) trail.pop();
+  retrace(0);
 }
 retheme = () => show(1.8);
 
@@ -1094,7 +1125,15 @@ function choose(kind, value) {
   }
 }
 Object.assign(window.vienna, { choices, labels, choose, pause(on) { paused = !!on; } });
-paintCv.addEventListener('click', nextScene);
+paintCv.addEventListener('click', e => { if (e.clientX < innerWidth / 2) back(); else forward(); });
+document.addEventListener('keydown', e => {
+  if (paused || e.defaultPrevented || e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  const t = e.target;
+  if (t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))) return;
+  e.preventDefault();
+  if (e.key === 'ArrowRight') forward(); else back();
+});
 if (placeButton) placeButton.addEventListener('click', nextPlace);
 if (seasonButton) seasonButton.addEventListener('click', nextSeason);
 if (weatherButton) weatherButton.addEventListener('click', nextWeather);
@@ -1104,7 +1143,7 @@ function step(dt, draw) {
   if (!cur) return;
   time += dt;
   for (const p of places) p.tick(time);
-  if (!HOLD && !paused) { seasonClock += dt; if (seasonClock >= SEASON_SECONDS) nextScene(); }
+  if (!HOLD && !paused) { seasonClock += dt; if (seasonClock >= SEASON_SECONDS) forward(); }
   moveClouds(dt);
   paint(dt);
   if (draw) drawSprites();
@@ -1127,7 +1166,7 @@ window.addEventListener('resize', resize);
 resize();
 if (!W) { requestAnimationFrame(function wait() { resize(); if (!W) requestAnimationFrame(wait); }); }
 window.vienna.ff = sec => { for (let i = 0, n = sec * 30; i < n; i++) step(1 / 30, false); drawSprites(); return time; };
-window.vienna.next = nextScene; window.vienna.nextSeason = nextSeason; window.vienna.nextWeather = nextWeather; window.vienna.nextPlace = nextPlace;
+window.vienna.next = forward; window.vienna.back = back; window.vienna.nextSeason = nextSeason; window.vienna.nextWeather = nextWeather; window.vienna.nextPlace = nextPlace;
 if (qs.get('t')) window.vienna.ff(parseFloat(qs.get('t')));
 paintCv.classList.add('ready');
 requestAnimationFrame(frame);
