@@ -3,7 +3,9 @@
  *  Donauinsel across the Neue Donau to the towers of the Donau City.
  *  The DC Tower with its folded side, the black DC 2 beside it, the
  *  Hochhaus Neue Donau and the white rings of the Danube Flats; on the
- *  far shore the beach with the yellow legs of the footbridge.  The
+ *  far shore the beach, and across the water the footbridge that
+ *  floats on it, hung between its yellow legs: laid out from spring to
+ *  autumn, hoisted up between them for the winter.  The
  *  Reichsbrücke crosses on the right, behind the little lighthouse,
  *  and along the deck hang the nets one lies in over the water.
  *
@@ -21,9 +23,9 @@ const { PP, clamp, smooth, ease, hex, mix, pick, rng, hash1, vnoise, fbm, spend,
 // ---------- what the brush is looking at ----------
 let W = 0, H = 0, U = 1, time = 0;          // the view (CSS pixels, the stroke unit) and the clock
 let PW = 1, PH = 1;                         // the photo's width and height in pixels
-let pal = null, traits = null, night = false, season = '', bare = false, wet = false, sun = false, white = 0;   // white: how much snow lies
+let pal = null, traits = null, night = false, season = '', bare = false, wet = false, sun = false, up = false, white = 0;   // up: the footbridge is hoisted; white: how much snow lies
 const use = s => {
-  pal = s.pal; traits = s.traits; night = s.night; season = s.season; bare = traits.bare; wet = traits.rain > 0; sun = !night && traits.shadow > 0;
+  pal = s.pal; traits = s.traits; night = s.night; season = s.season; bare = traits.bare; wet = traits.rain > 0; sun = !night && traits.shadow > 0; up = season === 'winter';
   white = traits.snow ? 1 : season !== 'winter' ? 0 : s.weather === 'frost' ? .5 : s.weather === 'sunny' ? .75 : .3;
   return s;
 };
@@ -60,7 +62,7 @@ const T = (x0, x1, y0, col, kind, lit, far, top) => ({ x0, x1, y0, col, kind, li
 const dcLeft = pf => .055 - Math.max(0, pf - .066) * .0217, dcFold = pf => .117 + (pf - .03) * .012, dcEdge = pf => .153 + .0045 * tri((pf - .07) / .17);
 const DC1 = T(.045, .158, .03, 'glassDark', 'dc1', .5, .06, xf => xf < .055 ? .066 + (.055 - xf) * 46 : xf < .117 ? .066 - (xf - .055) * .58 : .03 + (xf - .117) * 1.1);
 const TOWERS = [                                               // from the back to the front
-  T(.376, .402, .512, 'citySand', 'flat', .4, .45), T(.398, .492, .496, 'wall', 'flat', .4, .5), T(.49, .575, .517, 'citySand', 'flat', .4, .5),
+  T(.372, .402, .49, 'citySand', 'flat', .4, .45), T(.398, .492, .486, 'wall', 'flat', .4, .5), T(.49, .575, .517, 'citySand', 'flat', .4, .5),
   T(-.63, -.56, .478, 'wall', 'bands', .4, .35), T(-.5, -.44, .452, 'glass', 'glass', .5, .3),               // made up: the photo ends at the high tower
   T(-.345, -.28, .468, 'towerLight', 'bands', .5, .3), T(-.26, -.195, .418, 'glass', 'glass', .6, .25), T(-.18, -.12, .446, 'wall', 'bands', .4, .3),
   T(-.108, -.052, .39, 'glass', 'glass', .6, .2), T(-.042, .05, .405, 'cityPane', 'bands', .7, .15),         // the last one is on it, cut by its edge
@@ -81,13 +83,39 @@ let lampHW = .001;                                             // half a lamp po
 const lampAt = xf => { const i = Math.round((xf - LAMP0) / LAMPS); return i >= 0 && Math.abs(xf - LAMP0 - i * LAMPS) < lampHW; };
 const shoreTop = xf => xf >= UNDER ? brTop(xf) + BRH - .001
   : .534 + (vnoise(xf * 38, 3.3) - .5) * .012 + (vnoise(xf * 130, 9.1) - .5) * .005 - .006 * smooth(.42, .47, xf);
-// the legs of the footbridge: [foot x, foot y, top x, top y]
-const LEGS = [[.411, .574, .423, .503], [.424, .574, .433, .507], [.461, .574, .452, .503], [.476, .574, .463, .499]], LEGW = .003;
-let legs = true;                                               // on a narrow screen the trees stand in front of them
+
+// The footbridge floats on the water, from the far shore to ours: a walk on pontoons, with a span in the middle
+// that hangs between two pairs of yellow legs.  For the winter the pontoons are taken away and the span is hoisted
+// up between the legs.  All of it by where it is on the photo (x plus BS: a narrow screen pushes it left a bit, so
+// that it stays clear of the trees).
+// its legs: [foot x, foot y, top x, top y, half its width]; the last two are the small ones the walk starts from, on the far shore
+const LEGS = [[.411, .58, .423, .496], [.424, .58, .433, .5], [.461, .58, .452, .496], [.476, .58, .463, .491], [.243, .574, .259, .557, .0024], [.256, .574, .272, .557, .0024]], LEGW = .0042;
+let BS = 0, wy0 = 0, wy1 = 0;                                  // wy0, wy1: where the walk is at the x footAt() was last asked about
+function walkAt(xb) {                                          // whether there is a walk at x, and how high
+  if (up) { wy0 = .5135; wy1 = .5235; return xb > .418 && xb < .469; }
+  const arch = smooth(.4, .424, xb) * smooth(.487, .462, xb);   // the span rises a little, and has no pontoons under it
+  wy1 = .577 + (xb - .243) * .011 - arch * .008; wy0 = wy1 - .011 + arch * .003;
+  return xb >= .243 && xb < .7;
+}
+function legAt(i, xb, pf) {
+  const g = LEGS[i], t = (g[1] - pf) / (g[1] - g[3]);
+  if (t < 0 || t > 1 || Math.abs(xb - g[0] - (g[2] - g[0]) * t) >= (g[4] || LEGW) * (1.25 - .45 * t)) return false;
+  zl = i; return true;
+}
+function footAt(xb, pf) {                                      // a leg of the footbridge, its walk, or neither
+  const walk = walkAt(xb) && pf >= wy0 && pf < wy1;
+  if (xb > .4 && xb < .485) {                                  // hoisted, the span hangs between the legs of each pair
+    if (legAt(0, xb, pf) || legAt(3, xb, pf)) return PYLON;
+    if (up && walk) return WALK;
+    if (legAt(1, xb, pf) || legAt(2, xb, pf)) return PYLON;
+  } else if (!up && xb > .238 && xb < .277 && (legAt(4, xb, pf) || legAt(5, xb, pf))) return PYLON;
+  return walk ? WALK : 0;
+}
 
 // The near bank, on the right: the lighthouse, the trees round its foot, the wall along the water and a
 // pavilion that floats in front of it.  All of it by where it is on the photo (x plus SH).
 const LX = .8205, BANK0 = .775, BANKX = .852, TREE0 = .785, PAV0 = .702, PAV1 = .79;
+let pav = true;                                                // on a narrow screen there is no room for the pavilion
 let finHW = .0011;
 const lhHW = pf => pf < .424 ? 0 : pf < .432 ? finHW : pf < .437 ? .0048 : pf < .451 ? .0056 : pf < .457 ? .0105 : .0072 + (pf - .457) * .045;
 const bankTop = xr => SHORE - .025 * smooth(BANK0, .83, xr);
@@ -105,7 +133,7 @@ const CV = [.205, .15, .106, .077, .057, .043, .033, .026, .021];   // from one 
 const CEND = CV[CV.length - 1], DEND = .016;                  // where the nets end, and the deck
 const dOf = (m, cv) => cv * K / (K - m * cv);                  // how far below the horizon a board's line and a cross line meet
 function deckLeft(d) {                                         // where the water ends at a level, among the things on the near bank
-  if (d < DEND) return d < .004 ? PAV0 : BANKX;
+  if (d < DEND) return d < .004 && pav ? PAV0 : d < .003 ? BANK0 : BANKX;
   const xa = VX + EDGE * d;
   return d * K / (xa - V2X) >= CV[0] ? xa : VX + NL * d;
 }
@@ -113,26 +141,23 @@ function deckLeft(d) {                                         // where the wate
 // ---------- whose a point is ----------
 // Every point of the picture belongs to one thing, the nearest that covers it, and only that thing's strokes
 // may start there.
-const SKY = 0, TOWER = 1, SHOREZ = 2, PYLON = 3, BRIDGE = 4, LHOUSE = 5, TREE = 6, BANK = 7, PAV = 8, WATER = 9, PLANK = 10, NET = 11;
+const SKY = 0, TOWER = 1, SHOREZ = 2, PYLON = 3, BRIDGE = 4, LHOUSE = 5, TREE = 6, BANK = 7, PAV = 8, WALK = 9, WATER = 10, PLANK = 11, NET = 12;
 let zt = null, zb = 0, zl = 0, zm = 0, zc = 0;                 // what zone() learnt on the way: the tower, the part of the bridge, the leg, the lines through the point
 function zone(xf, pf) {
   const xr = xf + SH, d = pf - SHORE;
   if (d >= 0) {
-    if (d < .004 && xr >= PAV0 && xr < PAV1) return PAV;
+    if (pav && d < .004 && xr >= PAV0 && xr < PAV1) return PAV;
     if (xr >= BANK0 && d < (xr >= BANKX ? DEND : .003)) return BANK;
     if (d >= DEND) {
       const m = zm = (xr - VX) / d;
       if (m >= EDGE) { const cv = zc = d * K / (xr - V2X); if (cv >= CV[0] || m >= NR) return PLANK; if (m >= NL) return cv < CEND ? PLANK : NET; }
     }
-    return WATER;
+    return d < .006 && footAt(xf + BS, pf) || WATER;            // the footbridge stands in the water
   }
   if (xr >= BANK0) { if (pf >= bankTop(xr)) return BANK; if (xr >= TREE0 && pf >= treeTop(xr)) return TREE; }
   if (pf >= .424) { const dl = Math.abs(xr - LX); if (dl < .0105 && dl < (pf >= .451 ? .0105 : lhHW(pf))) return LHOUSE; }
-  if (xr >= PAV0 && xr < PAV1 && pf >= pavTop(xr)) return PAV;
-  if (legs && pf >= .497 && xf > .4 && xf < .485) for (let i = 0; i < 4; i++) {
-    const g = LEGS[i], t = (g[1] - pf) / (g[1] - g[3]);
-    if (t >= 0 && t <= 1 && Math.abs(xf - g[0] - (g[2] - g[0]) * t) < LEGW * (1.25 - .45 * t)) { zl = i; return PYLON; }
-  }
+  if (pav && xr >= PAV0 && xr < PAV1 && pf >= pavTop(xr)) return PAV;
+  if (pf >= .49) { const k = footAt(xf + BS, pf); if (k) return k; }
   const st = shoreTop(xf);
   if (xf < UNDER && pf >= st) return SHOREZ;
   if (xf >= BR0) {
@@ -151,7 +176,7 @@ function skyTop(xf) {                                          // where the sky 
   if (xr >= BANK0) y = Math.min(y, bankTop(xr));
   if (xr >= TREE0) y = Math.min(y, treeTop(xr));
   const dl = Math.abs(xr - LX); if (dl < .0105) y = Math.min(y, dl < finHW ? .424 : dl < .0048 ? .432 : dl < .0056 ? .437 : .451);
-  if (xr >= PAV0 && xr < PAV1) y = Math.min(y, pavTop(xr));
+  if (pav && xr >= PAV0 && xr < PAV1) y = Math.min(y, pavTop(xr));
   return y;
 }
 function tone(k) {                                             // the colour of a thing, all in all: for a fresh coat, and for the water to mirror
@@ -168,6 +193,7 @@ function tone(k) {                                             // the colour of 
     case TREE: return bare ? mix(pal.folDark, pal.skyLow, .35) : mix(pal.folDark, pal.folMid, .45);
     case BANK: return mix(pal.stone, pal.folDeep, .4);
     case PAV: return mix(pal.hull, pal.dark, .3);
+    case WALK: return mix(pal.hull, pal.tower, .2);
     case PLANK: return white ? mix(pal.plank, pal.snow, white * .7) : pal.plank;
     case NET: return mix(pal.net, pal.beam, .25);
   }
@@ -280,27 +306,58 @@ function shoreStroke(x, y) {
     return mix(c, pal.haze, bare ? .45 : .28);
   };
   const snowy = c => white ? mix(c, pal.snow, white * .75) : c;
+  const wk = !up && walkAt(xf + BS) ? py(wy0) : 1e9;           // where the walk of the footbridge runs in front of it: nothing is dabbed over that
+  const daub = (r, c) => {
+    if (y > wk - 4 * U) { const l = (2 + R() * 4) * U, yc = Math.min(y, wk - 1.2 * U); PP.brush(x - l, yc, x + l, yc, 1.3 * U, c, o); }
+    else PP.dab(x, y, r, c, { a: .9, den: .8, core: .6, s: 1.6 * U });
+  };
   if (xf >= UNDER) {                                           // under the bridge: the bank beyond it, in its shade
     const t = (pf - top) / (SHORE - top);
-    if (t < .62) PP.dab(x, y, (1.4 + R() * 2.2) * U, mix(leaves(), pal.haze, .25 + (t < .2 ? .2 : 0)), { a: .9, den: .8, core: .6, s: 1.6 * U });
+    if (t < .62) daub((1.4 + R() * 2.2) * U, mix(leaves(), pal.haze, .25 + (t < .2 ? .2 : 0)));
     else { const l = (3 + R() * 7) * U; PP.brush(x - l, y, x + l, y, (1.3 + R()) * U, mix(snowy(pal.stoneBridge), pal.haze, .3), o); }
     return;
   }
-  if (pf < .548) PP.dab(x, y, (1.4 + R() * 2.4) * U, leaves(), { a: .9, den: .8, core: .6, s: 1.6 * U });
+  if (pf < .548) daub((1.4 + R() * 2.4) * U, leaves());
   else if (pf < .561) {                                        // the beach: pale ground, white things standing on it, a red umbrella here and there
     const l = (3 + R() * 6) * U;
     PP.brush(x - l, y, x + l, y, (1.4 + R()) * U, snowy(mix(pal.cityBeach, pal.towerLight, R() * .4)), o);
     if (k < .1) PP.brush(x, py(.55), x, py(.558), 1.3 * U, pal.hull, o);
     else if (k > .93 && season !== 'winter') PP.dab(x, py(.556), 1.3 * U, pal.cabin, { a: .95, den: 2, core: .9, s: U, jit: 5 });
-  } else if (pf < .571) PP.dab(x, y, (1.3 + R() * 2) * U, snowy(mix(pal.cityGreen, pal.folMid, R() * .6)), { a: .9, den: .8, core: .6, s: 1.5 * U });
+  } else if (pf < .571) daub((1.3 + R() * 2) * U, snowy(mix(pal.cityGreen, pal.folMid, R() * .6)));
   else { const l = (4 + R() * 8) * U; PP.brush(x - l, y, x + l, y, (1.3 + R()) * U, mix(pal.stoneBridge, pal.stone, .15 + .3 * fbm(x * .02 / U, y * .08 / U + 3)), o); }
 }
-function pylonStroke(x, y) {                                   // a yellow leg, its right side in the shade
-  const R = PP.R, g = LEGS[zl], bx = px(g[0]), by = py(g[1]), dx = px(g[2]) - bx, dy = py(g[3]) - by, len = Math.hypot(dx, dy);
-  const t = (by - y) / -dy, cx = bx + dx * t, hw = LEGW * (1.25 - .45 * t) * PW, right = x > cx, l = (3 + R() * 6) * U;
-  const xs = cx + (right ? .45 : -.45) * hw, la = Math.min(l, (1 - t) * len), lb = Math.min(l, t * len), bw = Math.max(1.2 * U, hw * .95);
-  veil(.75);
-  PP.brush(xs - dx / len * lb, y - dy / len * lb, xs + dx / len * la, y + dy / len * la, bw, right ? mix(pal.cityPylon, pal.cityPylonDark, .7) : pal.cityPylon, { a: .93, jit: 5, dry: .04, bow: 0, sp: Math.min(1.1 * U, bw) });
+function pylonStroke(x, y) {                                   // a yellow leg: bright where the light falls on it, its right side in the shade
+  const R = PP.R, g = LEGS[zl], bx = px(g[0] - BS), by = py(g[1]), dx = px(g[2] - BS) - bx, dy = py(g[3]) - by, len = Math.hypot(dx, dy);
+  const t = (by - y) / -dy, cx = bx + dx * t, hw = (g[4] || LEGW) * (1.25 - .45 * t) * PW, right = x > cx + hw * .15, l = (3 + R() * 6) * U;
+  const xs = cx + (right ? .5 : -.42) * hw, la = Math.min(l, (1 - t) * len), lb = Math.min(l, t * len), bw = Math.max(1.2 * U, hw * (right ? .8 : 1));
+  veil(.7);
+  PP.brush(xs - dx / len * lb, y - dy / len * lb, xs + dx / len * la, y + dy / len * la, bw, right ? mix(pal.cityPylon, pal.cityPylonDark, .75) : mix(pal.cityPylon, pal.cityPylonLight, R() * .5),
+    { a: .95, jit: 4, dry: .02, bow: 0, sp: Math.min(1.1 * U, bw) });
+}
+function walkStroke(x, y) {                                    // the walk of the footbridge: white, a railing on it, pontoons under it
+  const R = PP.R, xb = fx(x) + BS, pf = fy(y), o = { a: .93, jit: 5, dry: .04, bow: 0, sp: 1.1 * U };
+  if (!walkAt(xb)) return;
+  const y0 = py(wy0), h = py(wy1) - y0, t = (y - y0) / h, hung = up || smooth(.4, .424, xb) * smooth(.487, .462, xb) > .5;
+  const rail = white ? mix(pal.hull, pal.snow, white) : pal.hull;
+  let l = (3 + R() * 7) * U, tc, th, col;
+  veil(.7);
+  if (t >= .18 && t < .5 && Math.abs(xb / .0052 - Math.round(xb / .0052)) < .2) {    // a post of the railing
+    const xp = px(Math.round(xb / .0052) * .0052 - BS);
+    PP.line([[xp, y0 + h * .1], [xp, y0 + h * .52]], rail, 1.1 * U, { pass: 1, wob: .1 * U, a: .95, step: 999 });
+    return;
+  }
+  if (t < .18) { tc = .09; th = .18; col = rail; }                                                             // the hand rail
+  else if (t < .5) { tc = .34; th = .32; col = mix(mix(pal.tower, pal.hull, .35), pal.haze, .2); }              // what one sees through the railing
+  else if (hung) { tc = t < .8 ? .65 : .9; th = t < .8 ? .3 : .2; col = t < .8 ? mix(pal.hull, pal.towerLight, R() * .4) : mix(pal.dark, pal.tower, .3); }   // the span: its edge, and the dark under it
+  else if (t < .72) { tc = .61; th = .22; col = mix(pal.hull, pal.towerLight, R() * .3); }
+  else {                                                                                                       // the pontoons it lies on, one by one, and the dark between them
+    const i = Math.floor(xb / .0075), gap = xb / .0075 - i > .72;
+    tc = .86; th = .28; col = gap ? mix(pal.dark, pal.waterDark, .5) : mix(pal.hull, pal.tower, .12 + .2 * hash1(i * 7 + 3));
+    l = Math.min(l, .0018 * PW);
+  }
+  const yc = y0 + tc * h;
+  if (zone(fx(x - l), fy(yc)) !== WALK || zone(fx(x + l), fy(yc)) !== WALK) l *= .2;
+  PP.brush(x - l, yc, x + l, yc, Math.max(U, th * h * .9), col, o);
 }
 function bridgeStroke(x, y) {
   const R = PP.R, xf = fx(x), pf = fy(y), top = brTop(xf), part = zb, o = { a: .92, jit: 6, dry: .05, bow: 0, sp: 1.1 * U };
@@ -426,6 +483,7 @@ function waterStroke(x, y) {
   if (x > edge - (3 + d * 40) * U) col = mix(col, pal.waterDark, .45);                // and it is dark under the deck
   let l = (8 + R() * 22) * sz, w = (1.4 + R() * 2.2) * sz;
   if (R() < .2) { col = mix(col, R() < .55 ? pal.waterDark : pal.waterLight, .45); l *= .6; w = (.9 + R() * .5) * sz; }   // a ripple, drawn sharp
+  if (d < .006 && (zone(fx(x - l), pf) !== WATER || zone(fx(x + l), pf) !== WATER)) l *= .2;   // the footbridge stands in it
   PP.brush(x - l, y, x + Math.min(l, edge - x - U), y + (R() - .5) * U, w, col, { a: .85, jit: 6, dry: .15, sp: 1.1 * U, bow: 0 });
   if (night && tw && R() < tw.lit * .1) { glow(.5); PP.brush(x - 2 * sz, y, x + 2 * sz, y, 1.2 * U, pick(pal.lights, R()), { a: .45, sp: U, bow: 0, jit: 4 }); }   // its windows, glittering
 }
@@ -496,7 +554,7 @@ function netStroke(x, y) {                                     // a net in its f
 }
 
 // ---------- every stroke where it belongs ----------
-const STROKES = [null, towerStroke, shoreStroke, pylonStroke, bridgeStroke, lighthouseStroke, treeStroke, bankStroke, pavStroke, waterStroke, plankStroke, netStroke];
+const STROKES = [null, towerStroke, shoreStroke, pylonStroke, bridgeStroke, lighthouseStroke, treeStroke, bankStroke, pavStroke, walkStroke, waterStroke, plankStroke, netStroke];
 const within = (xa, ya, xb, yb, lo, hi) => () => {              // a stroke somewhere in a box, if what is there is of the kind asked for
   const R = PP.R, x = xa + R() * (xb - xa), y = ya + R() * (yb - ya);
   if (x < 0 || x >= W || y >= H || !at(x, y)) return;
@@ -505,11 +563,11 @@ const within = (xa, ya, xb, yb, lo, hi) => () => {              // a stroke some
 };
 let boxes = [], lampN = 0, landTop = 0, tops = null;
 function thinStroke() {                                        // what is too thin to be met by chance: the antennas, the lamps on the bridge, the yellow legs
-  const R = PP.R, n = THIN.length + lampN + (legs ? 4 : 0) + 1, i = (R() * n) | 0;
+  const R = PP.R, n = THIN.length + lampN + LEGS.length + 1, i = (R() * n) | 0;
   let xf, pf, want = TOWER;
   if (i < THIN.length) { const t = THIN[i]; xf = t.c; pf = t.y0 + R() * .085; }
   else if (i < THIN.length + lampN) { xf = LAMP0 + (i - THIN.length) * LAMPS; pf = brTop(xf) - R() * LAMPH; want = BRIDGE; }
-  else if (i < n - 1) { const g = LEGS[i - THIN.length - lampN], t = R(); xf = g[0] + (g[2] - g[0]) * t; pf = g[1] + (g[3] - g[1]) * t; want = PYLON; }
+  else if (i < n - 1) { const g = LEGS[i - THIN.length - lampN], t = R(); xf = g[0] + (g[2] - g[0]) * t - BS; pf = g[1] + (g[3] - g[1]) * t; want = PYLON; }
   else { xf = LX - SH; pf = .424 + R() * .033; want = LHOUSE; }
   const x = px(xf), y = py(pf);
   if (x < 0 || x >= W || !at(x, y) || zone(xf, pf) !== want) return;
@@ -530,7 +588,7 @@ function buildLights() {
   for (let i = Math.ceil((X0 - .02) / .034); i * .034 < .47; i++) add((i + (hash1(i * 7 + 1) - .5) * .5) * .034, .567, 0, .55, true);
   for (let i = 0; i < 8; i++) add(.062 + i * .0112, .557, 1, 1, true);
   for (let i = 0; i < lampN; i++) add(LAMP0 + i * LAMPS, brTop(LAMP0 + i * LAMPS) - LAMPH + .0015, 2, .85, true);
-  for (let i = 0; i < 6; i++) add(.713 + i * .0128 - SH, .5625, 0, .6, true);
+  if (pav) for (let i = 0; i < 6; i++) add(.713 + i * .0128 - SH, .5625, 0, .6, true);
   for (let i = 0; .8 + i * .023 < fx(W) + SH + .02; i++) { const xr = .8 + (i + (hash1(i * 5 + 3) - .5) * .5) * .023; add(xr - SH, bankTop(xr) + .009, 0, .5, xr < BANKX - .01); }
 }
 const lightCol = l => l.kind === 1 ? WHITE_LIGHT : l.kind === 2 ? pal.lights[l.h < .5 ? 1 : 3] : pal.lights[l.h < .4 ? 0 : l.h < .7 ? 4 : 2];
@@ -597,13 +655,13 @@ function coatStroke(x0, y0) {                                  // a fresh coat: 
     } else if (k === NET) { veil(flatOff(d) * .7); PP.brush(x - l * .6, y, x + l * .6, y, Math.min(12 * U, d * PH * .5), tone(k), o); }
     else if (k === TREE) { const a = (R() - .5) * 1.2; veil(.4); PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, 22 * U, tone(k), o); }
   }
-  if (y0 < py(.49) - 30 * U || y0 > py(SHORE + DEND) + 30 * U) return;
+  if (y0 < py(.486) - 30 * U || y0 > py(SHORE + DEND) + 30 * U) return;
   for (let n = 0; n < 18; n++) {                               // narrow strokes, close together: the shore, the bridge and the bank are narrow things
     const x = x0 + (n % 3 - 1 + (R() - .5) * .5) * 22 * U, y = y0 + ((n / 3 | 0) - 2.5 + (R() - .5) * .5) * 6.6 * U;
     if (x < -20 * U || x > W + 20 * U || y > H + 8 * U) continue;
     const k = zone(fx(clamp(x, 0, W - 1)), fy(Math.min(y, H - 1))), l = 15 * U;
     if (k === LHOUSE) { const hw = Math.max(lhHW(fy(y)), .004) * PW, cx = px(LX - SH); veil(.5); PP.brush(cx, y - 8 * U, cx, y + 8 * U, hw * 2, tone(k), o); }
-    else if (k === SHOREZ || k === BRIDGE || k === BANK || k === PAV) { veil(k === SHOREZ ? .8 : .5); PP.brush(x - l, y, x + l, y, 9 * U, tone(k), o); }
+    else if (k === SHOREZ || k === BRIDGE || k === BANK || k === PAV || k === WALK) { veil(k === SHOREZ ? .8 : .5); PP.brush(x - l, y, x + l, y, 9 * U, tone(k), o); }
   }
 }
 
@@ -656,7 +714,7 @@ const place = {
   colors: {
     glassDark: '#27303c', glassBlue: '#4f6a86', towerRib: '#66778a',
     towerDc2: '#26282c', towerDc2Frame: '#575b62', towerWhite: '#f1efe8',
-    citySand: '#d9cdb2', cityPane: '#a9c0b8', cityPodium: '#9a6a4a', cityBeach: '#ddd4bc', cityPylon: '#f0d43a', cityPylonDark: '#bf9e2a', cityBeak: '#e58a2c',
+    citySand: '#d9cdb2', cityPane: '#a9c0b8', cityPodium: '#9a6a4a', cityBeach: '#ddd4bc', cityPylon: '#f7d21c', cityPylonLight: '#ffe65a', cityPylonDark: '#b98f14', cityBeak: '#e58a2c',
     stoneBridge: '#d5d0c2', stoneBridgeDark: '#8f8b80', lhCap: '#56655d',
     plank: '#878e97', plankLight: '#afb3b7', plankDark: '#5f6670', gap: '#1e2228',
     beam: '#cbbd9a', beamDark: '#8f846c', bolster: '#e0b233', bolsterDark: '#a87d22', net: '#16181c', netLine: '#4c5057', snow: '#eef2f4',
@@ -670,7 +728,7 @@ const place = {
     Y0 = -.05 - .17 * tall; PH = H / shown; PW = PH * 4 / 3 * (1 - .32 * tall);
     const n = W / PW;                                          // how many photos wide the picture is
     if (n >= 1) { X0 = -(n - 1) * .25; SH = 0; } else { X0 = .02 * tall; SH = Math.max(0, .985 - X0 - n); }   // what there is more room for is mostly deck and trees, on the right
-    legs = SH < .25;
+    BS = Math.min(SH, .093); pav = SH < .2;
     lampHW = Math.max(.0009, .8 * U / PW); finHW = Math.max(.0011, .8 * U / PW);
     for (const t of THIN) { const hw = Math.max(.0011, .8 * U / PW); t.x0 = t.c - hw; t.x1 = t.c + hw; }
     place.hz = py(SHORE);
@@ -679,12 +737,12 @@ const place = {
     for (let i = 0; i < m; i++) { tops[i] = py(skyTop(fx(i + .5))); if (tops[i] < landTop) landTop = tops[i]; }
     landTop = Math.max(0, landTop - 8 * U);
     lampN = Math.max(0, Math.ceil((fx(W) - LAMP0) / LAMPS));
-    const ua = U * U * 1e6, hz = place.hz, foot = py(SHORE + DEND), split = py(.497), dx = Math.max(0, px(VX + EDGE * (fy(H) - SHORE) - SH));
+    const ua = U * U * 1e6, hz = place.hz, foot = py(SHORE + DEND), split = py(.486), dx = Math.max(0, px(VX + EDGE * (fy(H) - SHORE) - SH));
     const box = (key, rate, xa, ya, xb, yb, lo, hi) => ({ key, n: rate * Math.max(0, xb - xa) * Math.max(0, yb - ya) / ua, fn: within(xa, ya, xb, yb, lo, hi) });
     boxes = [
-      box('dp-high', RATE.town, 0, landTop, Math.min(W, px(.385)), split, TOWER, PAV),                 // the towers
-      box('dp-right', RATE.town, Math.max(0, px(.78 - SH)), py(.36), W, split, TOWER, PAV),             // the trees and the lighthouse
-      box('dp-low', RATE.town, 0, split, W, foot, TOWER, PAV),                                         // the shores, the bridge
+      box('dp-high', RATE.town, 0, landTop, Math.min(W, px(.385)), split, TOWER, WALK),                 // the towers
+      box('dp-right', RATE.town, Math.max(0, px(.78 - SH)), py(.36), W, split, TOWER, WALK),             // the trees and the lighthouse
+      box('dp-low', RATE.town, 0, py(.486), W, foot, TOWER, WALK),                                         // the shores, the bridge
       box('dp-water', RATE.water, 0, hz, W, H, WATER, WATER),
       box('dp-deck', RATE.deck, dx, foot, W, H, PLANK, NET),
     ];
