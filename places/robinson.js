@@ -11,8 +11,9 @@
  *  cone and the flag where they are on it, the bushes as a heap of
  *  crowns.  On it children looked out of the window and a girl stood
  *  in the bushes: the window is empty and dark, and nobody is about.
- *  The photograph is an upright one: the trees a wide screen shows to
- *  the left and right of it, and the wood behind them, are made up.
+ *  The photograph is an upright one: on a wide screen the thicket goes
+ *  on to the left and right of it, as dense as it is round the hut, and
+ *  that is made up.
  *  The flag flies as the wind blows, and at night somebody has left a
  *  lantern burning in the window.
  *  scene.js paints the sky and says what a place has to bring along.
@@ -36,7 +37,7 @@ const at = (x, y) => { const s = kit.at(x, y, place); return s && use(s); };   /
 
 // ---------- geometry ----------
 // Everything is measured on the photograph: x and y as fractions of its width and height.  It is an upright one:
-// a narrow screen shows a slice of its width, a wide one a slice of its height and the trees that stand to its
+// a narrow screen shows a slice of its width, a wide one a slice of its height and the thicket that goes on to its
 // left and right (see layout).
 let X0 = 0, Y0 = 0;
 const px = f => (f - X0) * PW, py = f => (f - Y0) * PH, fx = x => X0 + x / PW, fy = y => Y0 + y / PH;
@@ -154,23 +155,43 @@ for (const t of [[.335, .022, .012, .275, .17, .04, 0], [.205, .055, .012, .205,
 // one that is closer to where its bush stands.
 const SHRUB = [[.1, .94]], TREE = [[.75, 1.02], [.735, .85], [.72, .7], [.705, .55], [.695, .42], [.705, .3], [.73, .18]];
 const BRIAR = [[.27, .7]], TWINE = [[.705, .56]], SPRAYS = [[.3, 1.03], [.47, 1.04], [.62, 1.03], [.76, 1.02]];
-// Beyond the photograph, on either side, there are more trees, and they are made up: [x, where the crown is, how
-// big it is, where its foot is].  Bare ground lies under them, and a wood closes it off far behind.
-const TREES = [[-.19, .4, .2, .9], [-.1, .6, .12, .93], [-.09, .77, .11, .93], [-.43, .27, .22, .88], [-.62, .5, .14, .84], [-.8, .3, .2, .87], [-1, .42, .17, .85],
-  [1.2, .38, .2, .9], [1.11, .6, .12, .93], [1.1, .78, .11, .93], [1.43, .27, .22, .88], [1.62, .48, .14, .84], [1.82, .3, .2, .87], [2.02, .42, .17, .85]];
+// Beyond the photograph, on either side, the thicket goes on, and that is made up: trees and bushes, [x, where the
+// crown is, how big it is, where its foot is, of what kind, where it stands].  Most of them stand in the thick of it;
+// some stand in front of all the others: bushes on the ground, and a tree here and there, its trunk to be seen.
+const AMID = 0, AHEAD = 1;
+const BEYOND = [
+  [-.05, .44, .08, .93, 0, 0], [-.17, .56, .13, .93, 1, 0], [-.07, .75, .12, .94, 0, 0], [-.24, .78, .13, .94, 0, 0], [-.36, .55, .13, .92, 0, 0], [-.42, .76, .14, .93, 1, 0], [-.58, .5, .15, .9, 1, 0],
+  [-.68, .27, .15, .9, 0, 0], [-.62, .76, .14, .93, 0, 0], [-.8, .58, .16, .92, 0, 0], [-.93, .34, .18, .9, 0, 0], [-.97, .75, .15, .93, 0, 0],
+  [-.4, .29, .12, .9, 0, 1], [-.84, .3, .13, .9, 1, 1], [-.13, .9, .06, .97, 2, 1], [-.3, .92, .05, .99, 2, 1], [-.5, .89, .07, .96, 1, 1], [-.7, .92, .06, .98, 2, 1], [-.9, .9, .07, .97, 2, 1],
+  [1.08, .4, .1, .92, 1, 0], [1.15, .6, .14, .93, 1, 0], [1.12, .83, .1, .95, 2, 0], [1.31, .5, .12, .92, 0, 0], [1.36, .74, .15, .93, 0, 0], [1.5, .55, .15, .91, 1, 0], [1.52, .3, .14, .9, 0, 0],
+  [1.6, .79, .13, .94, 0, 0], [1.75, .28, .18, .9, 0, 0], [1.77, .62, .16, .92, 1, 0], [1.95, .4, .17, .9, 0, 0], [1.93, .75, .15, .93, 0, 0],
+  [1.3, .35, .15, .9, 0, 1], [1.66, .36, .12, .9, 2, 1], [1.2, .92, .06, .98, 2, 1], [1.4, .9, .05, .97, 2, 1], [1.56, .92, .07, .99, 1, 1], [1.75, .89, .06, .96, 2, 1], [1.9, .92, .07, .98, 2, 1],
+];
+const HEAPS = BEYOND.map((t, i) => {                           // every one of them is a heap of crowns round the middle of its own
+  const r = rng(1000 + i), crowns = [];
+  for (let n = 4 + Math.round(t[2] * 32); n > 0; n--) {
+    const a = r() * TAU, d = Math.sqrt(r()) * .8;
+    crowns.push([t[0] + Math.cos(a) * d * t[2], t[1] + Math.sin(a) * d * t[2] * .62, t[2] * (.45 + r() * .3), t[4]]);
+  }
+  return crowns;
+});
 const DENSE = [[0, .27], [.3, .33], [.45, .34], [.6, .34], [.75, .37], [1, .3]];
-const farTop = xf => .49 + (vnoise(xf * 3.1, 1.7) - .5) * .12 + (vnoise(xf * 14, 4.2) - .5) * .04;
+const CREST = new Float32Array(751).fill(.62);                 // how high the thicket stands out there, from x = -1 to 2: as high as its crowns, those in front left out
+BEYOND.forEach((t, i) => {
+  if (t[5] === AMID) for (const c of HEAPS[i]) for (let n = Math.max(0, Math.ceil((c[0] - c[2] * .8 + 1) / .004)), d; n < CREST.length && (d = (n * .004 - 1 - c[0]) / (c[2] * .8)) < 1; n++) CREST[n] = Math.min(CREST[n], c[1] - c[2] * .65 * Math.sqrt(1 - d * d));
+});
 const out = xf => xf < 0 ? -xf : xf > 1 ? xf - 1 : 0;          // how far beyond the photograph a point lies
-const here = xf => smooth(.12, .03, out(xf));                  // 1 on the photograph, among the bushes round the hut; 0 out among the trees
-// The bushes on the photograph end in a big round one just beyond it on either side: where its top is, and how deep
-// inside it a point is
-function dome(xf) { const d = out(xf); return d < .17 ? DENSE[xf < 0 ? 0 : DENSE.length - 1][1] + (1 - Math.sqrt(1 - d * d / .0289)) * .45 : 9; }
-function within(xf, pf) { const d = out(xf); return !d ? 1 : d >= .17 ? 0 : smooth(-.015, .02, pf - dome(xf) - (vnoise(pf * 40, xf * 30) - .5) * .03); }
+// Behind the thicket there is a wood, far off and pale.  Hardly anything of it is to be seen: how much, where no leaf
+// is in the way
+const farTop = xf => .52 + (vnoise(xf * 3.1, 1.7) - .5) * .12 + (vnoise(xf * 14, 4.2) - .5) * .04;
+function gap(xf, pf) { const d = out(xf); return d ? smooth(.03, .12, d) * smooth(-.01, .03, pf - farTop(xf)) * smooth(.5, .62, vnoise(xf * 5.3 + 3, pf * 4.1)) : 0; }
 function dense(xf) {                                           // below it no sky is to be seen between the trees, leaves or no leaves
-  const y = out(xf) ? Math.min(farTop(xf), dome(xf)) : along(DENSE, xf);
+  const d = out(xf);
+  let y = along(DENSE, xf);
+  if (d) { const f = clamp((xf + 1) / .004, 0, CREST.length - 1.001), i = f | 0; y += (CREST[i] + (CREST[i + 1] - CREST[i]) * (f - i) - y) * smooth(0, .05, d); }
   return y + (vnoise(xf * 30, 5.5) - .5) * .03 + (vnoise(xf * 110, 2.5) - .5) * .01;
 }
-const groundTop = xf => .895 - .115 * smooth(.02, .22, out(xf)) + (vnoise(xf * 7, 3.3) - .5) * .035;
+const groundTop = xf => .895 - .035 * smooth(.02, .22, out(xf)) + (vnoise(xf * 7, 3.3) - .5) * .035;
 let gCell = 3, gCols = 0, gRows = 0, backQ = null, backK = null, backV = null, frontQ = null, frontK = null, frontV = null;
 let limbs = [], limbSum = null, stoutN = 0, stoutLength = 0, limbLength = 0, mask = null, mCols = 0, mRows = 0, mCell = 2;
 const limbX = (s, t) => (1 - t) * (1 - t) * s.x1 + 2 * t * (1 - t) * s.cx + t * t * s.x2;
@@ -182,17 +203,8 @@ function buildWood() {
   backK = new Uint8Array(gCols * gRows); frontK = new Uint8Array(gCols * gRows); backV = new Int8Array(gCols * gRows); frontV = new Int8Array(gCols * gRows);
   limbs = [];
   const x0 = fx(0) - .15, x1 = fx(W) + .15;
-  // what stands beyond the photograph: a tree is a heap of crowns round the middle of its own
-  const far = [], stands = [];
-  TREES.forEach((t, i) => {
-    if (t[0] + t[2] < x0 || t[0] - t[2] > x1) return;
-    const r = rng(1000 + i), kind = i % 3 === 2 ? ELDER : BUSH, crowns = [];
-    for (let n = 6 + Math.round(t[2] * 70); n > 0; n--) {
-      const a = r() * TAU, d = Math.sqrt(r()) * .78;
-      crowns.push([t[0] + Math.cos(a) * d * t[2], t[1] + Math.sin(a) * d * t[2] * .62, t[2] * (.28 + r() * .22), kind]);
-    }
-    far.push(...crowns); stands.push([t, crowns, 30 + i]);
-  });
+  const far = [], near = [], stands = [];                      // what stands beyond the photograph
+  BEYOND.forEach((t, i) => { if (t[0] + t[2] > x0 && t[0] - t[2] < x1) { (t[5] === AHEAD ? near : far).push(...HEAPS[i]); stands.push([t, HEAPS[i], 30 + i]); } });
   const stamp = (Q, K, V, c) => {
     const cx = px(c[0]), cy = py(c[1]), r = c[2] * PW;
     const i0 = Math.max(0, Math.floor((cx - r) / gCell)), i1 = Math.min(gCols - 1, Math.ceil((cx + r) / gCell)), j0 = Math.max(0, Math.floor((cy - r) / gCell)), j1 = Math.min(gRows - 1, Math.ceil((cy + r) / gCell));
@@ -205,6 +217,7 @@ function buildWood() {
   for (const c of BACK) if (seen(c)) stamp(backQ, backK, backV, c);
   for (const c of far) stamp(backQ, backK, backV, c);
   for (const c of FRONT) if (seen(c)) stamp(frontQ, frontK, frontV, c);
+  for (const c of near) stamp(frontQ, frontK, frontV, c);
   // Their wood.  Every crown hangs on a limb that comes from the next one nearer to where the bush stands, and
   // carries twigs of its own; a limb is as stout as what hangs on it is many.
   const add = (xa, ya, xb, yb, bend, w, front, red, k) => {
@@ -216,7 +229,7 @@ function buildWood() {
     if (depth > 1 || len < 5 * U) return;
     for (let v = r() < .4 ? 3 : 2; v > 0; v--) { const f = .4 + r() * .6; sprig(r, limbX(s, f), limbY(s, f), a + (r() - .5) * 1.8, len * (.45 + r() * .3), Math.max(.7 * U, w * .65), depth + 1, front, red); }
   };
-  const grove = (crowns, stand, front, red, seed) => {
+  const grove = (crowns, stand, front, red, seed, girth = front ? .0015 : .003) => {
     const r = rng(seed), roots = stand.map(p => ({ x: px(p[0]), y: py(p[1]), r: 0, n: 1, d: 0 })), root = roots[0];
     const nodes = roots.slice(1).concat(crowns.map(c => ({ x: px(c[0]), y: py(c[1]), r: c[2] * PW, n: 1 })));
     for (const n of nodes) n.d = Math.hypot(n.x - root.x, n.y - root.y);
@@ -228,7 +241,7 @@ function buildWood() {
     }
     for (let i = nodes.length - 1; i >= 0; i--) nodes[i].up.n += nodes[i].n;
     for (const n of nodes) {
-      const w = clamp(Math.pow(n.n, .6) * (front ? .0015 : .003) * PW, .9 * U, .04 * PW);
+      const w = clamp(Math.pow(n.n, .6) * girth * PW, .9 * U, .04 * PW);
       add(n.up.x, n.up.y, n.x, n.y, (r() - .5) * (front ? .5 : .4), w, front, red, r());
       for (let t = n.r ? 4 + (r() * 3 | 0) : 0; t > 0; t--) sprig(r, n.x, n.y, -Math.PI / 2 + (r() - .5) * 3.8, n.r * (.5 + r() * .55), Math.max(.8 * U, w * .5), 0, front, red);
     }
@@ -238,7 +251,15 @@ function buildWood() {
   grove(FRONT.filter(c => c[3] === BUSH && seen(c)), BRIAR, true, false, 13);
   grove(FRONT.filter(c => c[3] === ELDER && seen(c)), TWINE, true, false, 14);
   SPRAYS.forEach((p, i) => grove(FRONT.filter(c => c[3] === ASH && Math.abs(c[0] - p[0]) < .09 && c[0] > .2 && seen(c)), [p], true, i > 1, 15 + i));
-  for (const [t, crowns, seed] of stands) grove(crowns, [[t[0], t[3] + .03], [t[0] + .012, (t[1] + t[3]) / 2], [t[0] - .01, t[1] + t[2] * .3]], false, false, seed);
+  for (const [t, crowns, seed] of stands) {
+    const ahead = t[5] === AHEAD, lean = (seed % 5 - 2) * .012, top = [t[0] + lean, t[1] + t[2] * .3];
+    if (!ahead || t[1] > .6) { grove(crowns, [[t[0], t[3] + .03], [t[0] + lean * .4, (t[1] + t[3]) / 2], top], ahead, ahead && t[4] === ASH && seed % 2 > 0, seed); continue; }
+    // a tree in front of the others: it leans away from the hut, is stoutest at its foot and goes on up through its crown
+    const bend = seed % 2 ? .07 : -.07, s = add(px(t[0] + (t[0] < .5 ? .6 : -.6) * t[2]), py(t[3] + .03), px(top[0]), py(top[1]), bend, t[2] * .16 * PW, true, false, .5);
+    s.bole = true;
+    for (const f of [.55, .25]) add(s.x1, s.y1, limbX(s, f), limbY(s, f), bend * f, s.w * (1.36 - f * .45), true, false, .5).bole = true;
+    grove(crowns, [top, [top[0] + lean * .5, t[1] + t[2] * .05], [top[0] + lean, t[1] - t[2] * .2]], true, false, seed, .003);
+  }
   // where the wood is: 1 behind the hut, 2 in front of it; 4 and 8 the same for what is too stout for leaves to hide
   limbs.sort((a, b) => b.w - a.w);
   mCell = 1.5 * U; mCols = Math.ceil(W / mCell) + 1; mRows = Math.ceil(H / mCell) + 1;
@@ -247,7 +268,7 @@ function buildWood() {
   let sum = 0;
   limbs.forEach((s, i) => {
     const stout = s.w > (s.front ? .003 : .007) * PW, bits = (s.front ? 2 : 1) | (stout ? s.front ? 8 : 4 : 0), rad = s.w / 2 + .3 * U, m = Math.ceil(rad / mCell);
-    sum += s.len * (s.w + 2 * U); limbSum[i] = sum; limbLength += s.len;
+    sum += s.len * (s.bole ? 2 * U : s.w + 2 * U); limbSum[i] = sum; limbLength += s.len;   // a stroke goes right across such a trunk: it need not be met more often than a twig
     if (stout) { stoutN = i + 1; stoutLength += s.len; }
     for (let k = 0, n = Math.ceil(s.len / (mCell * .5)); k <= n; k++) {
       const ix = Math.floor(limbX(s, k / n) / mCell), iy = Math.floor(limbY(s, k / n) / mCell);
@@ -412,15 +433,15 @@ function staffStroke() {                                       // the pole of th
 const dark = () => mix(pal.folDeep, pal.folDark, .25);
 function green(lum) { return lum < .3 ? mix(pal.folDeep, pal.folDark, lum / .3) : lum < .6 ? mix(pal.folDark, pal.folMid, (lum - .3) / .3) : mix(pal.folMid, pal.folLight, (lum - .6) / .4); }
 function leafStroke(x, y, k) {
-  const R = PP.R, kind = zk, d = zf, up = zv, xf = zx, pf = zy, q = R(), near = k === NEAR, off = 1 - here(xf), sz = leafSz * (near ? 1.15 : 1 - off * .25);
-  const same = z => z === k;
+  const R = PP.R, kind = zk, d = zf, up = zv, xf = zx, pf = zy, q = R(), near = k === NEAR, far = out(xf) > 0, sz = leafSz * (near ? 1.15 : 1) * (far ? .9 : 1);
+  const same = z => z === k, sp = (far ? 1.9 : 1.4) * U;       // beyond the photograph it all stands a little further off, and there is so much of it: the brush is a coarser one
   // light and shade in patches, the top of every crown in the light, the wood darker the further down one looks into it
-  let lum = clamp(.5 + ((leafLum(x, y) - .5) * .8 + (R() - .5) * .5 + up * (kind === ASH ? 0 : .14 + off * .14)) * (.6 + .5 * sun) + (kind === ELDER ? .1 : kind === ASH ? .08 : 0) - (near ? 0 : .06) - smooth(.55, .9, pf) * (near ? .06 : .22) * (1 - off));
-  veil(near ? .1 : .5 + off * .15);
+  let lum = clamp(.5 + ((leafLum(x, y) - .5) * .8 + (R() - .5) * .5 + up * (kind === ASH ? 0 : .14)) * (.6 + .5 * sun) + (kind === ELDER ? .1 : kind === ASH ? .08 : 0) - (near ? 0 : .06) - smooth(.55, .9, pf) * (near ? .06 : .22));
+  veil(near ? far ? .3 : .1 : .5);                              // nor are the trees in front of the thicket as close as the leaves in front of the hut
   if (white && lum > .45 && q < white * .35) { PP.dab(x, y, (.5 + R() * .5) * sz, pal.snow, { a: .92, den: .9, core: .6, s: 1.5 * U, sx: 1.6, sy: .6, jit: 3 }); return; }
   if (lum < .17 && d > .12) {                                  // the dark between the leaves
     const a = R() * Math.PI, l = (.4 + R() * .5) * sz;
-    PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (.7 + R() * .5) * sz, dark(), { a: .85, sp: 1.5 * U, dry: .1, jit: 5, bow: .2 });
+    PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (.7 + R() * .5) * sz, dark(), { a: .85, sp: sp * 1.07, dry: .1, jit: 5, bow: .2 });
     return;
   }
   if (kind === ELDER && d > .1 && lum > .3) {                  // the elder: plates of cream in May, black berries on red stalks from August
@@ -432,7 +453,7 @@ function leafStroke(x, y, k) {
       return;
     }
   }
-  if (kind === BUSH && near && season !== 'spring' && vnoise(x * .3 / leafSz + 9, y * .3 / leafSz) > .76 && q < .6) {   // old man's beard
+  if (kind === BUSH && near && !far && season !== 'spring' && vnoise(x * .3 / leafSz + 9, y * .3 / leafSz) > .76 && q < .6) {   // old man's beard
     PP.dab(x, y, (.5 + R() * .4) * sz, mix(pal.fluff, pal.folMid, .15 + R() * .2), { a: .7, den: .7, core: .25, s: 1.3 * U, jit: 5 });
     return;
   }
@@ -440,7 +461,7 @@ function leafStroke(x, y, k) {
   if (kind !== ASH) { if (lum > .62 && q < .28) col = mix(col, pal.folSun, .7); else if (pal.accent && lum > .3 && q > (kind === ELDER ? .95 : .9)) col = pick(pal.accent, R()); }
   if (kind === ASH && d > .12) {                               // the ash: a leaf is a row of leaflets
     const a = Math.PI / 2 + (R() - .5) * 2.6, ca = Math.cos(a), sa = Math.sin(a), n = q < .7 ? 2 : 3, st = .44 * sz, l = (.42 + R() * .22) * sz;
-    const o = { a: .9, sp: 1.2 * U, dry: .12, jit: 8, bow: .2 };
+    const o = { a: .9, sp: sp * .86, dry: .12, jit: 8, bow: .2 };
     if (!same(zone(x + ca * st * n * .5, y + sa * st * n * .5)) || !same(zone(x - ca * st * n * .5, y - sa * st * n * .5))) return;
     for (let j = 0; j < n; j++) {
       const cx = x + ca * st * (j - n / 2 + .5), cy = y + sa * st * (j - n / 2 + .5);
@@ -453,7 +474,7 @@ function leafStroke(x, y, k) {
   let wd = (.5 + R() * .4) * sz;
   if (d > .45) reach[0] = reach[1] = l;                        // deep among the leaves there is nothing it could get in the way of
   else { run(x, y, ca, sa, l, same, Math.max(1.5, .3 * sz)); const r0 = reach[0], r1 = reach[1]; wd = room(x, y, -sa, ca, wd, same); reach[0] = r0; reach[1] = r1; }
-  PP.brush(x - ca * reach[0], y - sa * reach[0], x + ca * reach[1], y + sa * reach[1], wd, col, { a: .9, sp: 1.4 * U, dry: .12, jit: 9, bow: .2 });
+  PP.brush(x - ca * reach[0], y - sa * reach[0], x + ca * reach[1], y + sa * reach[1], wd, col, { a: .9, sp, dry: .12, jit: 9, bow: .2 });
 }
 function ivyStroke(x, y) {                                     // ivy: dark leaves, each with a shine on it; it keeps them all winter
   const R = PP.R, lum = clamp(.3 + (fbm(zx * 60 + 3, zy * 80) - .5) * 1.3 + (R() - .5) * .4), r = (.28 + R() * .26) * leafSz;
@@ -471,7 +492,7 @@ function limbStroke(stout) {                                   // a stretch of b
   const s = limbs[a], span = Math.min(1, (8 + R() * 16) * U / s.len), t0 = R() * (1 - span), tm = t0 + span / 2, t1 = t0 + span, mx = limbX(s, tm), my = limbY(s, tm);
   if (mx < 0 || my < 0 || mx >= W || my >= H || !at(mx, my) || zone(mx, my) !== (s.front ? STEM : LIMB)) return;   // not where leaves or the hut hide it
   const bark = s.red ? mix(pal.stem, pal.trunk, s.k * .5) : mix(pal.trunk, pal.grey[2], s.w > 3 * U ? .12 + s.k * .2 : .05), q = R();
-  veil(s.front ? .1 : .5);
+  veil(s.front ? out(fx(mx)) ? .3 : .1 : .5);
   const o = { a: .93, jit: 8, dry: .06, sp: Math.min(1.2 * U, s.w), bow: .03 };
   for (let i = s.w < 2 * U ? 1 : 0; i < 2; i++) {               // a twig in one stroke, a limb in two: it bends
     const u = i ? s.w < 2 * U ? t0 : tm : t0, v = i ? t1 : tm, ax = limbX(s, u), ay = limbY(s, u), bx = limbX(s, v), by = limbY(s, v);
@@ -482,7 +503,7 @@ function limbStroke(stout) {                                   // a stretch of b
 }
 const stoutStroke = () => limbStroke(true);
 function thicketStroke(x, y) {                                 // the bare wood: twigs, what light comes through them, an old man's beard still hanging
-  const R = PP.R, depth = clamp((zy - dense(zx)) / .4), q = R(), off = 1 - within(zx, zy), sz = (1 - off * .45) * U;
+  const R = PP.R, depth = clamp((zy - dense(zx)) / .4), q = R(), off = gap(zx, zy), sz = (1 - off * .45) * U;
   veil(.6 + off * .25);
   if (white && q < white * .2) { PP.dab(x, y, (2 + R() * 3.5) * sz, pal.snow, { a: .9, den: .6, core: .5, sx: 1.7, sy: .5 }); return; }
   if (q < .42) { PP.dab(x, y, (3 + R() * 5) * sz, mix(mix(pal.skyLow, pal.haze, .5), pal.twigs[off < .5 && fbm(zx * 14, zy * 9) > .5 ? 0 : 1], (.3 + depth * .5) * (1 - off * .45)), { a: .8, den: .5, core: .4, s: 2.2 * U }); return; }
@@ -490,8 +511,8 @@ function thicketStroke(x, y) {                                 // the bare wood:
   const a = -Math.PI / 2 + (R() - .5) * (q < .72 ? .5 : 2.2), l = (6 + R() * 14) * sz, ca = Math.cos(a) * l, sa = Math.sin(a) * l;
   PP.line([[x, y], [x + ca * .5 + (R() - .5) * 3 * U, y + sa * .5], [x + ca, y + sa]], mix(ramp(pal.twigs, R() * .75 + (1 - depth) * .2), pal.haze, off * .35), (.8 + R() * 1.2) * sz, { pass: 1, a: .8 });
 }
-function duskStroke(x, y) {                                    // under the bushes it is dark, a leaf here and there catches some light; the wood beyond the clearing is far off and pale
-  const R = PP.R, off = 1 - within(zx, zy), a = (R() - .5) * 1.4, l = (4 + R() * 8) * U * (1 - off * .35);
+function duskStroke(x, y) {                                    // under the bushes it is dark, a leaf here and there catches some light; the wood behind the thicket is far off and pale
+  const R = PP.R, off = gap(zx, zy), a = (R() - .5) * 1.4, l = (4 + R() * 8) * U * (1 - off * .35);
   const t = clamp((zy - dense(zx)) / .22), lum = clamp(.62 - t * .45 + (fbm(zx * 26, zy * 30) - .5) * 1.1 + (R() - .5) * .25);
   let col = R() < .12 ? mix(pal.folDark, pal.folMid, R() * .5) : mix(dark(), pal.soil[0], R() * .5);
   if (off > 0) col = mix(col, pal.accent && R() > .93 ? mix(pick(pal.accent, R()), pal.haze, .4) : mix(green(lum), pal.haze, .42), off);
@@ -510,7 +531,7 @@ function groundStroke(x, y) {                                  // bare earth, tr
     PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l * .6, x + Math.cos(a) * l, y + Math.sin(a) * l * .6, (1.2 + R() * 1.2) * sz, pick(pal.bits, R()), { a: .92, jit: 7, dry: .05, sp: 1.1 * U, bow: .2 });
     return;
   }
-  const sd = shadow(x, y), turf = fbm(xf * 5 + 9, pf * 22) + (1 - here(xf)) * .12 - depth * .1;
+  const sd = shadow(x, y), turf = fbm(xf * 5 + 9, pf * 22) + smooth(.02, .2, out(xf)) * .1 - depth * .1;
   if (turf > .58 || q > .95) {                                 // grass: every blade upright, the sod under them
     const a = q < .45 ? 0 : -Math.PI / 2 + (R() - .5) * .9 + wind(time) * .08, l = (2 + R() * 3) * sz * (q < .45 ? 1.6 : 1);
     let col = bare ? mix(pal.soil[2], pal.folMid, .3) : mix(pal.folDark, R() < .5 ? pal.folMid : pal.folLight, q < .45 ? .3 : R() * .8);
@@ -518,7 +539,7 @@ function groundStroke(x, y) {                                  // bare earth, tr
     PP.brush(x - (q < .45 ? l : 0), y, x + Math.cos(a) * l, y + Math.sin(a) * l, (q < .45 ? 2.4 : 1 + R()) * sz, col, { a: .87, jit: 8, dry: .15, sp: 1.1 * U, bow: .2 });
     return;
   }
-  let col = ramp(pal.soil, .25 + fbm(xf * 9 + 4, pf * 40) * .9 + (R() - .5) * .25 + (1 - here(xf)) * .25 - smooth(.03, 0, pf - top) * .3);   // out among the trees the light falls on it
+  let col = ramp(pal.soil, .25 + fbm(xf * 9 + 4, pf * 40) * .9 + (R() - .5) * .25 - smooth(.03, 0, pf - top) * .3);
   if (wet) col = mix(mix(col, pal.soil[0], .3), pal.skyLow, .12 + R() * .12);
   if (sd) col = mix(col, pal.soil[0], sd * .4);
   run(x, y, 1, 0, (3 + R() * 8) * sz, same, 2 * U);
@@ -601,11 +622,11 @@ function coatStroke(x0, y0, what) {                            // a fresh coat: 
     if (k === LEAF || k === NEAR) {
       const a = (R() - .5) * 1.2, same = z => z === k, wd = room(x, y, -Math.sin(a), Math.cos(a), 24 * U, same), ll = wd < 24 * U ? l * .4 : l * .9;
       const lum = clamp(.3 + zf * .25 + (zk === ELDER ? .12 : 0) - smooth(.55, .9, pf) * .2);
-      veil(k === NEAR ? .1 : .5);
+      veil(k === NEAR ? out(xf) ? .3 : .1 : .5);
       PP.brush(x - Math.cos(a) * ll, y - Math.sin(a) * ll, x + Math.cos(a) * ll, y + Math.sin(a) * ll, wd, zk === ASH ? ramp(pal.ash, lum) : green(lum), o);
     } else if (k === IVY) { veil(.2); PP.brush(x - l * .4, y, x + l * .4, y, 9 * U, pal.ivy[1], o); }
-    else if (k === DUSK) { const off = 1 - within(xf, pf); veil(.6 + off * .25); PP.brush(x - l, y, x + l, y, 18 * U, mix(mix(dark(), pal.soil[0], .3), mix(green(.42), pal.haze, .42), off), o); }
-    else if (k === THICKET) { const off = 1 - within(xf, pf); veil(.6 + off * .25); PP.brush(x - l, y, x + l, y, 18 * U, mix(mix(pal.skyLow, pal.haze, .5), pal.twigs[1], .55 - off * .2), o); }
+    else if (k === DUSK) { const off = gap(xf, pf); veil(.6 + off * .25); PP.brush(x - l, y, x + l, y, 18 * U, mix(mix(dark(), pal.soil[0], .3), mix(green(.42), pal.haze, .42), off), o); }
+    else if (k === THICKET) { const off = gap(xf, pf); veil(.6 + off * .25); PP.brush(x - l, y, x + l, y, 18 * U, mix(mix(pal.skyLow, pal.haze, .5), pal.twigs[1], .55 - off * .2), o); }
     else if (k === GROUND) { veil(.2); PP.brush(x - l, y, x + l, y, 16 * U, white ? mix(pal.soil[1], pal.snow, .25 + white * .65) : pal.soil[1], o); }
   }
 }
@@ -661,8 +682,8 @@ const place = {
   layout(v) {
     W = v.W; H = v.H; U = v.U;
     // The hut stands in the middle.  An upright screen shows the photograph from top to bottom, and of its width
-    // what there is room for.  A wide one loses a little of its sky and the foot of the cone, and shows the trees
-    // that stand to the left and right of it.  A very wide one comes closer.
+    // what there is room for.  A wide one loses a little of its sky and the foot of the cone, and shows the thicket
+    // going on to the left and right of it.  A very wide one comes closer.
     const wide = clamp((W / H - .75) / .6);
     let shown = .97 - .1 * wide;
     Y0 = .012 + .03 * wide; PH = H / shown; PW = PH * .75;
@@ -695,8 +716,8 @@ const place = {
     c.lineTo(0, y); c.closePath();
   },
   front(s, x, y) { use(s); return zone(x, y) !== SKY; },       // leaves, limbs and the flag's pole stand in front of the sky
-  orb(o) {                                                     // the sun and the moon stand where the sky is open: between the trees on the left, or beside the flag
-    o.x = clamp(px(X0 < -.3 ? -.13 : .405), o.r * 1.6, W - o.r * 1.6);
+  orb(o) {                                                     // the sun and the moon stand where the sky is open: over the low bushes between two trees on the left, or beside the flag
+    o.x = clamp(px(X0 < -.3 ? -.18 : .405), o.r * 1.6, W - o.r * 1.6);
     let clear = 1e9;
     for (let i = Math.max(0, (o.x - o.r * 1.3) | 0); i < Math.min(open.length, o.x + o.r * 1.3); i++) clear = Math.min(clear, open[i]);
     o.y = Math.max(o.r * 1.3, Math.min(o.y, clear - o.r * 1.5));
