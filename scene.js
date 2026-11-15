@@ -550,6 +550,7 @@ const wind = t => Math.sin(t * 1.7) * .5 + Math.sin(t * 2.9 + 1) * .3 + Math.sin
 //   sprites           [{ draw(painter, time, picture), t0, seed }]: what moves, drawn anew every frame
 const kit = {
   PP, E, TAU, clamp, smooth, ease, hex, mix, css, pick, rng, hash1, vnoise, fbm, wind, light, spend, clipBand, skyCol, dens,
+  palette: paletteOf,                                         // palette(place, season, weather, night): the colours of another hour, for a lamp to show them by
   at(x, y, place) { const s = sceneAt(x, y); return s && s.place === place ? s : null; },
 };
 const places = PLACES.map(p => Object.assign(p.make(kit), { id: p.id, name: p.name }));
