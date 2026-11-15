@@ -5,19 +5,17 @@
  *  on its wires, a tree stands at their head.  The sun is on the old
  *  house on the right; the stairs lie in its shade.
  *
- *  Like the Freie Mitte this one is painted after a photograph:
- *  thurngasse-map.js, loaded before this file, says for every point
- *  what there is (a wall, a window, a step), how light it is there
- *  without the sun, and where the sun falls when it shines.  The rails
- *  are too thin for that: the map has them as lines, and the corners of
- *  the windows that are lit at night.  The trees, the lamp and the
- *  street sign are drawn by hand.  Nobody is on the stairs.
+ *  It is painted after a photograph, measured by hand: where the
+ *  houses on either side run to, how high their floors are and where
+ *  their windows sit, the flights of the stairs and every rail and
+ *  post on them, and the edge of the shade.  The photograph is square
+ *  and looks up the stairs; what lies beyond it on either side is
+ *  made up.  Nobody is on the stairs.
  *  scene.js paints the sky and says what a place has to bring along.
  * ------------------------------------------------------------------ */
 (window.viennaPlaces = window.viennaPlaces || []).push({ id: 'thurngasse', name: 'Thurngasse', make(kit) {
 'use strict';
-const { PP, clamp, smooth, mix, pick, rng, vnoise, fbm, wind, spend, clipBand } = kit;
-const MAP = window.viennaMaps.thurngasse;
+const { PP, clamp, smooth, mix, pick, rng, hash1, vnoise, fbm, wind, spend, clipBand } = kit;
 
 // ---------- what the brush is looking at ----------
 let W = 0, H = 0, U = 1, time = 0;          // the view (CSS pixels, the stroke unit) and the clock
@@ -34,33 +32,228 @@ const px = f => (f - X0) * PW, py = f => (f - Y0) * PH, fx = x => X0 + x / PW, f
 const HOR = .355;                                              // the roof at the end of the street
 const HEAD = .487;                                             // the head of the stairs: the trees stand behind it
 const corner = pf => pf < .095 ? .2545 + pf * .195 : .2728;   // the corner of the house on the left: it hides what is behind it
-// Beyond the photograph everything goes on as it ended: on the right the bare wall of the house, the steps, the
-// pavement.  On the left the balconies and the stairs end where the photograph does: from there on it is the wall
-// of the house, and its dark ground floor down to the pavement.
-const BESIDE = .06, FOOT = .556;
-const fold = xf => xf < 0 ? BESIDE : xf > .992 ? .992 : xf;
-const foldY = (xf, pf) => xf < 0 && pf > FOOT && pf < .8 ? FOOT : pf;
-
-// ---------- the map ----------
-// One character a cell: what it is, times eight, plus how light it is, from 0 to 7.
-const SKY = 0, WALL = 1, CREAM = 2, YELLOW = 3, WARM = 4, GLASS = 5, STEP = 6, PAVE = 7, ROAD = 8, RAIL = 10, LIMB = 11, LEAVES = 12, PLATE = 13, PANE = 14;
-const CODE = new Uint8Array(128);
-for (let c = 35, v = 0; c < 127; c++) if (c !== 92) CODE[c] = v++;
-const MW = MAP.w, MH = MAP.h, SWD = MAP.sun.w, SHT = MAP.sun.h;
-const cells = new Uint8Array(MW * MH), suns = new Uint8Array(SWD * SHT);
-for (let i = 0; i < cells.length; i++) cells[i] = CODE[MAP.cells.charCodeAt(i)];
-for (let i = 0; i < suns.length; i++) suns[i] = MAP.sun.cells.charCodeAt(i) - 48;
-const roofs = new Uint16Array(MW);                             // how far down the sky comes in each column
-for (let i = 0; i < MW; i++) { let j = 0; while (j < MH && cells[j * MW + i] >> 3 === SKY) j++; roofs[i] = j; }
-
-let lev = 0, cellJ = 0;                                        // what what() learnt on the way: how light it is, which row
-function what(xf, pf) {                                        // what there is at a point of the photo
-  const i = clamp(fold(xf) * MW | 0, 0, MW - 1), j = clamp(foldY(xf, pf) * MH | 0, 0, MH - 1), v = cells[j * MW + i];
-  cellJ = clamp(pf * MH | 0, 0, MH - 1); lev = v & 7; return v >> 3;
+const inside = (p, x, y) => { let o = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > y) !== (p[j][1] > y) && x < (p[j][0] - p[i][0]) * (y - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) o = !o; return o; };
+function lineAt(p, x) {                                         // how high a line through points is at x; beyond its ends it stays as it ended
+  if (x <= p[0][0]) return p[0][1];
+  for (let i = 1; i < p.length; i++) if (x < p[i][0]) return p[i - 1][1] + (p[i][1] - p[i - 1][1]) * (x - p[i - 1][0]) / (p[i][0] - p[i - 1][0]);
+  return p[p.length - 1][1];
 }
-function sunAt(xf, pf) {                                       // how much of the sun gets there, when it shines
-  const u = clamp(fold(xf) * SWD - .5, 0, SWD - 1.001), v = clamp(foldY(xf, pf) * SHT - .5, 0, SHT - 1.001), i = u | 0, j = v | 0, a = u - i, b = v - j, o = j * SWD + i;
-  return ((suns[o] * (1 - a) + suns[o + 1] * a) * (1 - b) + (suns[o + SWD] * (1 - a) + suns[o + SWD + 1] * a) * b) / 7;
+// The two houses run up the street side by side: whatever is level on them runs to one point (VX, VY), which lies
+// low in the picture, at the height of our eyes, for we stand at the foot of the stairs and look up.  A level is
+// known by how high it is where the house on the right has its corner (RX), or the one on the left (LX).  How far
+// along a wall a thing is, is told by one over its distance from that point: evenly spaced windows are evenly
+// spaced in that.  And since we look up, what is upright on the right leans in, towards a point high over the
+// picture (ZX, ZY); an upright is known by where it is at the height AY.  On the left that is too little to tell.
+const VX = .37, VY = .715, ZX = .465, ZY = -7.8, RX = .9, LX = .15, AY = .33;
+const levR = (xf, pf) => VY + (pf - VY) * (RX - VX) / (xf - VX), levL = (xf, pf) => VY + (pf - VY) * (LX - VX) / (xf - VX);
+const upright = (xf, pf) => ZX + (xf - ZX) * (AY - ZY) / (pf - ZY);
+const leftAt = (lv, s) => { const x = VX - 1 / s; return [x, VY + (lv - VY) * (x - VX) / (LX - VX)]; };   // the point at a level, so far along the left house
+function rightAt(lv, s) {                                      // and along the right one: where the level and the upright meet
+  const m = (lv - VY) / (RX - VX), c = (VX + 1 / s - ZX) / (AY - ZY), x = (ZX + c * (VY - m * VX - ZY)) / (1 - c * m);
+  return [x, VY + m * (x - VX)];
+}
+// Where the sky ends: down the house on the left, along the roofs of the one behind the trees and the one at the
+// end of the street, up the eaves on the right.
+const ROOF = [[.2545, 0], [.273, .095], [.2735, .238], [.332, .262], [.34, .3], [.345, .354], [.466, .355], [.4665, .3], [.477, .25], [.481, .22], [.489, .19], [.503, .173],
+  [.52, .16], [.541, .12], [.551, .08], [.56, .04], [.564, 0]];
+const roofAt = xf => xf > ROOF[0][0] && xf < .564 ? lineAt(ROOF, xf) : -1;   // no sky over the houses
+// Where the houses stand on the stairs, where the stairs stand on the pavement, the kerb.
+const STAIRTOP = [[0, .68], [.118, .68], [.122, .612], [.15, .573], [.18, .536], [.205, .519], [.255, .501], [.272, .492], [.33, .482], [.5, .482], [.56, .49], [.6, .5],
+  [.62, .52], [.66, .55], [.7, .575], [.74, .6], [.78, .63], [.82, .66], [.85, .7], [.9, .7], [.96, .712]];
+const STAIRFOOT = [[.15, .8], [.17, .808], [1, .806]], KERB = .853;
+
+// ---------- what there is ----------
+// Each thing says what it is made of and how light that is, from 0 to 7, before sun and shade.  A wall is made of
+// cells, CELL wide and ROW high: a stroke is a cell high and as long as the same thing goes on.
+const SKY = 0, WALL = 1, CREAM = 2, YELLOW = 3, WARM = 4, GLASS = 5, STEP = 6, PAVE = 7, ROAD = 8, RAIL = 10, LIMB = 11, LEAVES = 12, PLATE = 13, PANE = 14;
+const ROW = 1 / 672, CELL = 1 / 448;
+let lev = 0, cellJ = 0;                                        // what what() learnt on the way: how light it is, which row of cells
+let light = 0, worn = 0;                                       // what a thing says of itself: how light, and how blotchy its plaster is
+const glass = (x, y) => { light = .6 + 4.2 * vnoise(x * 120, y * 70); return GLASS; };   // the sky in it, or the house across the street
+
+// The house on the left is a new one, grey and smooth.  Its front looks on the Wasagasse, balconies one above the
+// other at the edge of the photograph, DEEP wide: [top, foot].  Its side runs up the stairs, from LC to its far
+// corner: narrow windows, [top, foot] floor by floor and [from, to] along it.  The ground floor is dark, from PLINTH
+// down; beside the stairs slats fence off a way down to the cellar: [as far as, from where down, where its rail
+// begins to go down].
+const LC = .147, PLINTH = .535, BALCONIES = [[.03, .18], [.245, .35], [.42, .525]], DEEP = .053, FENCE = [.118, .6, .075];
+const LFLOORS = [[-.545, -.47], [-.365, -.275], [-.165, -.08], [.01, .095], [.18, .265], [.4, .475]], LBAYS = [[5.75, 6.22], [6.32, 6.56], [7.35, 7.85], [8.6, 9.05], [9.3, 9.9]];
+function leftHouse(x, y) {
+  if (y > PLINTH) {
+    if (x >= 0 && x < FENCE[0] && y > FENCE[1]) { light = x < FENCE[2] - (y - FENCE[1]) * .68 ? 2.9 : x / .0115 % 1 < .45 ? 3.3 : 1.7; return CREAM; }   // the way down, and the slats
+    light = y < PLINTH + .012 ? 2.6 : 1;
+    return WALL;
+  }
+  if (x >= LC) {                                               // its side
+    const lv = levL(x, y), s = 1 / (VX - x);
+    for (const f of LFLOORS) if (lv > f[0] && lv < f[1]) for (const b of LBAYS) if (s > b[0] && s < b[1]) return glass(x, y);
+    light = lv > .41 && lv < .425 ? 2.2 : 5.1 - 1.4 * smooth(.2, 0, y) - Math.max(0, x - .18) * 9 - 2.5 * smooth(.2, 0, y) * smooth(.235, .265, x);   // a ledge; its eaves keep the light off the top of it
+    worn = .5;
+    return WALL;
+  }
+  light = 3.1 + 1.6 * smooth(.12, .44, y);
+  if (x >= 0) for (const b of BALCONIES) {
+    const foot = b[1] - (DEEP - x) * .3;                       // we see them from below
+    if (x < DEEP && y > b[0] && y < foot) { if (y > foot - .03) return glass(x, y * .2); light = y < b[0] + .006 ? 3.6 : 2.3; return WALL; }
+    if (x < .022 && y > b[0] - .05 && y < b[0] - .012) return glass(x, y);   // the door out on to it
+    if (x < .105 && y > b[0] + .02 && y < b[1] + .02) light -= 1;            // and the shade it throws
+  }
+  if (x >= 0) light -= .9 * smooth(.11, .04, x);
+  worn = .5;
+  return WALL;
+}
+// Between the left house and the one at the end of the street the side of another shows, old plaster with yellow
+// left on it.  The tree stands in front of it.
+function sideHouse(x, y) {
+  light = 3.3 + 1.6 * smooth(.37, .43, y); worn = 3;
+  return y > .4 && vnoise(x * 70 + 3, y * 50) > .62 ? YELLOW : CREAM;
+}
+// The house at the end of the street looks down the stairs: from FAR[0] to FAR[1], its red roof down to FARROOF,
+// three windows wide ([from, to]) and two floors of it to be seen ([top, foot]).
+const FAR = [.345, .466], FARROOF = .376, FARBAYS = [[.351, .362], [.392, .403], [.437, .448]], FARFLOORS = [[.402, .42], [.439, .464]];
+function farHouse(x, y) {
+  if (y < FARROOF) { light = 1.6; worn = 1; return WARM; }
+  for (const f of FARFLOORS) if (y > f[0] && y < f[1]) for (const b of FARBAYS) if (x > b[0] && x < b[1]) return glass(x, y);
+  if (y > .466 && x > .405 && x < .462 && vnoise(x * 220, 2) > .45) { light = 2; return WARM; }   // awnings over its shops
+  light = 3.5; worn = 2;
+  return CREAM;
+}
+// The old houses on the right, one long front up the stairs.  The nearest is cream, white where its plaster is
+// worn, from its corner to CREAMS; then a white one, which stands out a little, to WHITES; then yellow ones up to
+// the head of the stairs.  Floors: [top, foot] of their windows, from the attic down.  Windows: [from, to] along
+// the two near houses, a frame RIM wide round each; farther up, from BAY0 on, one every BAY, PANES wide.  Levels:
+// the eaves of the far houses from below; a broad band under the second floor, a string course under the first;
+// the frieze, the cornice and the grey ground floor under it.
+const CREAMS = 3.46, WHITES = 3.8, BAY0 = 4.25, BAY = .36, PANES = .13, RIM = .012;
+const CROSS = .36;                                             // how far down a window the bar across it is
+const RFLOORS = [[-.72, -.6], [-.52, -.375], [-.318, -.187], [-.053, .075], [.222, .362]], RBAYS = [[2.05, 2.17], [2.4, 2.52], [2.655, 2.78], [2.93, 3.05], [3.2, 3.32], [3.625, 3.72]];
+const EAVES = -.95, BAND = [-.17, -.11], STRING = [.125, .14], FRIEZE = .38, CORNICE = [.41, .455];
+const CELLAR = [.434, .505, 2.66, 2.77];                       // a window down by the stairs: its top and foot, from and to
+// The white house stands out: its side is in the shade, and so is what of the yellow ones lies behind it.
+const SIDE = [[.612, -.01], [.632, -.01], [.632, .265], [.565, .445], [.55, .445], [.612, .25]];
+// Its front, round the corner, looks on the Wasagasse: bare, the cornice at CORNER[1] where the two meet at
+// CORNER[0], somebody's yellow paint under it, and at its foot the low wall the stairs begin behind: [left, right, top].
+const CORNER = [.925, .42], LOW = [.805, .925, .652];
+const SCRAWL = [[.93, .462], [.96, .47], [.985, .5], [.99, .56], [.975, .62]];
+function rightHouse(x, y) {
+  if (x > LOW[0] && x < LOW[1] && y > LOW[2]) { light = y < LOW[2] + .006 ? 3.4 : 1.8; return WALL; }
+  const a = upright(x, y);
+  if (a > upright(CORNER[0], CORNER[1])) {                     // the front
+    const c = CORNER[1] - (x - CORNER[0]) * .06;
+    if (y < c - .005) { if (a < .925 + .028 * smooth(.2, 0, y) && y < .2) { light = 3; return WALL; } light = 2 + 1.8 * smooth(0, .4, y); worn = 1; return CREAM; }
+    if (y < c + .022) { light = y < c ? 4.5 : 1.5; return WALL; }
+    light = 3.9 - 8 * clamp(x - .94, 0, .1); worn = 1;
+    let d = 1;
+    for (let i = 1; i < SCRAWL.length; i++) {
+      const p = SCRAWL[i - 1], q = SCRAWL[i], t = clamp(((x - p[0]) * (q[0] - p[0]) + (y - p[1]) * (q[1] - p[1])) / ((q[0] - p[0]) ** 2 + (q[1] - p[1]) ** 2));
+      d = Math.min(d, Math.hypot(x - p[0] - (q[0] - p[0]) * t, y - p[1] - (q[1] - p[1]) * t));
+    }
+    return d < .002 + vnoise(x * 60, y * 60) * .008 ? YELLOW : CREAM;
+  }
+  if (inside(SIDE, x, y)) { light = 1.2; worn = 1; return WALL; }
+  const lv = levR(x, y), s = 1 / (a - VX), near = s < WHITES;
+  if (lv > CELLAR[0] && lv < CELLAR[1] && s > CELLAR[2] && s < CELLAR[3]) return glass(x, y);
+  for (const f of RFLOORS) if (lv > f[0] - .014 && lv < f[1] + .014) {
+    if (near) {
+      for (const b of RBAYS) if (s > b[0] - RIM && s < b[1] + RIM) {
+        const u = (s - b[0]) / (b[1] - b[0]), v = (lv - f[0]) / (f[1] - f[0]);
+        if (u < 0 || u > 1 || v < 0 || v > 1 || Math.abs(u - .5) < .05 || Math.abs(v - CROSS) < .03) { light = 6.6; return WALL; }   // its frame, and the bars between the panes
+        return glass(x, y);
+      }
+    } else if (lv > f[0] && lv < f[1] && s > BAY0 && (s - BAY0) / BAY % 1 < PANES / BAY) return glass(x, y);
+  }
+  if (lv > FRIEZE) { light = lv < CORNICE[0] ? 5.6 : lv < CORNICE[1] ? 1.4 : 3; worn = lv < CORNICE[1] ? 0 : .6; return WALL; }
+  if (!near) {                                                 // the yellow ones, paler the farther up they stand
+    if (lv < EAVES) { light = 1.3; worn = 1; return WALL; }
+    light = 3.4 + 1.4 * smooth(7, 4.5, s); worn = 3;
+    return s < 4.5 && lv > -.6 && vnoise(x * 50, y * 30 + 7) > .5 ? YELLOW : CREAM;
+  }
+  worn = 1.6;
+  if (s > CREAMS) { light = 5.3; if (lv < -.05) return WALL; light = 5; return CREAM; }
+  if (lv > BAND[0] && lv < BAND[1]) { light = 4.4; worn = .6; return CREAM; }
+  if (lv > STRING[0] && lv < STRING[1]) { light = 3.6; worn = .6; return CREAM; }
+  if (lv < BAND[0]) { light = 5.1; return fbm(x * 55, y * 55 + 3) > .44 ? WALL : CREAM; }
+  light = 5.6;
+  return fbm(x * 55, y * 55 + 3) > .6 ? WALL : CREAM;
+}
+
+// The stairs, from their head down: flights of steps and the landings between them, [from where, how light, how
+// much of a landing].  Up there only the middle of them is as light as that: the sides are steps in the shade of
+// the houses.  A step is the smaller the farther up it is; its riser is dark, its edge is worn light.
+const FLIGHTS = [[HEAD - .01, 2.2, 0], [.535, 1.5, 0], [.547, 2.1, 0], [.557, 3.9, 1], [.592, 2.6, 0], [.597, 4.4, 1], [.614, 3.2, 0], [.638, 4.5, .6], [.663, 5.2, 1], [.705, 2.5, 0],
+  [.718, 4.8, 1], [.73, 4.2, 0], [.749, 3.6, 0], [.773, 4.3, 0], [.79, 3.4, 0]];
+const WIDE = .72, DAMP = .663;                                 // from WIDE down the steps go from house to house; down to DAMP the stone is blotched
+function stairs(x, y) {
+  let f = FLIGHTS[0];
+  for (const g of FLIGHTS) if (y >= g[0]) f = g;
+  const hw = .1 + (y - HEAD) * .78, mid = y > WIDE ? 1 : smooth(hw + .07, hw - .02, Math.abs(x - .43)), flat = f[2] * mid;
+  light = 2.9 + (f[1] - 2.9) * mid;
+  if (y < DAMP) light -= 2.4 * mid * smooth(.5, .6, fbm(x * 16 + 7, y * 44));   // where the stone is wet, or dirty
+  const n = (Math.log(.0015 + (y - .48) * .055) / .055 % 1 + 1) % 1;   // which step, and where on it
+  if (n < .3) light -= 2 * (1 - flat); else if (n > .8) light += .9 * (1 - flat);
+  worn = 1;
+  return STEP;
+}
+// The pavement: lighter than the road, in the shade of the house on its right; kerbstones along it, two manhole
+// covers in it: [x, y, half as wide, half as high].
+const COVERS = [[.6, .831, .024, .0045], [.83, .83, .024, .0045], [.09, .834, .02, .004]];
+function pavement(x, y) {
+  light = y > KERB - .007 ? 1.2 : y > KERB - .012 ? 5.6 : 3.9 - 1.3 * smooth(.68, .9, x) - 1.1 * smooth(.1, 0, x);
+  for (const c of COVERS) if (Math.abs(Math.hypot((x - c[0]) / c[2], (y - c[1]) / c[3]) - .85) < .2) light -= 1.3;
+  worn = 1;
+  return PAVE;
+}
+// The road at our feet: asphalt, a darker patch of new asphalt on the right, a pale strip along the bottom of the
+// picture, a drain: [left, right, top, foot].
+const PATCH = [[.52, .875], [1.5, .875], [1.5, .925], [.555, .925]], STRIP = .965, DRAIN = [.44, .55, .93, .955];
+function road(x, y) {
+  worn = 1;
+  if (x > DRAIN[0] && x < DRAIN[1] && y > DRAIN[2] && y < DRAIN[3]) { light = (x - (y - DRAIN[2]) * .5) / .009 % 1 < .5 ? .4 : 2.6; worn = 0; }
+  else if (y > STRIP && x > .2 + (y - STRIP)) light = 5.4;
+  else if (inside(PATCH, x, y)) light = .6;
+  else light = y < .875 ? 2.4 - 1.6 * smooth(.4, .8, x) : 3.2 - .9 * smooth(.5, .56, x) - .5 * smooth(.1, 0, x);
+  return ROAD;
+}
+// Where things are darker than they say, or lighter: [x, y, half as wide, half as high, by how much].  The steps
+// under the house on the right and beside the one on the left, the far ends of the lowest flight; the low wall.
+const GLOOM = [[.78, .67, .1, .05, -1.2], [.21, .57, .05, .035, -.6], [.92, .77, .16, .04, -1.2], [.04, .76, .12, .05, -1], [.34, .545, .06, .02, -.8], [.4, .7, .2, .025, .5]];
+const COLS = Math.round(1 / CELL), known = new Uint8Array(COLS * Math.round(1 / ROW));   // what a cell of the photograph was found to be: nothing is worked out twice
+function what(xf, pf) {                                        // what there is at a point of the photo
+  const i = Math.floor(xf / CELL), n = xf >= 0 && xf < 1 && pf >= 0 && pf < 1 ? Math.floor(pf / ROW) * COLS + i : -1;
+  cellJ = Math.floor(pf / ROW);
+  if (n >= 0 && known[n]) { lev = known[n] - 1 & 7; return known[n] - 1 >> 3; }
+  const x = (i + .5) * CELL, y = (cellJ + .5) * ROW;
+  let k;
+  worn = 0;
+  if (y >= KERB) k = road(x, y);
+  else if (y >= lineAt(STAIRFOOT, x)) k = pavement(x, y);
+  else if (x >= 0 && y >= lineAt(STAIRTOP, x)) k = stairs(x, y);
+  else if (y < roofAt(x)) { light = 0; k = SKY; }
+  else if (x < corner(y)) k = leftHouse(x, y);                 // beyond the photograph it goes on without balconies, and the stairs end at it
+  else if (x < FAR[0]) k = sideHouse(x, y);
+  else if (x < FAR[1]) k = farHouse(x, y);
+  else k = rightHouse(x, y);
+  if (worn) {
+    for (const g of GLOOM) { const d = Math.hypot((x - g[0]) / g[2], (y - g[1]) / g[3]); if (d < 1.4) light += g[4] * smooth(1.4, .6, d); }
+    // no wall is the same all over, and stone still less: blotches, long ones on the steps, and a grain
+    light += k >= STEP ? (fbm(x * 11, y * 60) - .47) * 2.4 * worn + (vnoise(x * 150, y * 420) - .5) * .7 : (fbm(x * 38, y * 38 + 5) - .47) * 1.3 * worn + (vnoise(x * 170, y * 250) - .5) * 1.1;
+  }
+  lev = clamp(Math.round(light), 0, 7);
+  if (n >= 0) known[n] = k * 8 + lev + 1;
+  return k;
+}
+// Where the sun falls, when it shines: on the houses on the right from the cornice up, and on the one at the end
+// of the street.  The stairs lie in the shade; a little gets through on to the road and the pavement, and on to
+// the slats: [x, y, half as wide, half as high].
+const SUNLIT = [[.59, -.02], [.585, .1], [.595, .14], [.568, .25], [.51, .253], [.498, .3], [.497, .375], [.365, .375], [.365, .5], [.5, .497], [.6, .52], [.66, .53], [.675, .55],
+  [.72, .55], [.75, .52], [.8, .49], [.85, .455], [.885, .42], [.895, .4], [.93, .395], [.975, .35], [.955, -.02]];
+const SPOTS = [[.08, .68, .012, .02], [.24, .902, .045, .006], [.6, .896, .035, .005], [.72, .864, .016, .004], [.05, .94, .03, .005], [.26, .978, .03, .007], [.47, .944, .012, .004]];
+function sunAt(xf, pf) {                                       // how much of the sun gets there
+  const j = (vnoise(xf * 90, pf * 90) - .5) * .008;            // no shadow has an edge as straight as that
+  if (pf < .56) return inside(SUNLIT, xf + j, pf - j) ? 1 : 0;
+  let s = 0;
+  for (const p of SPOTS) { const d = Math.hypot((xf - p[0]) / p[2], (pf - p[1]) / p[3]); if (d < 1) s = Math.max(s, smooth(1, .4, d) * .8); }
+  return s;
 }
 
 // ---------- the light ----------
@@ -87,7 +280,7 @@ function toneOf(x, y, xf, pf, l) {                             // where on its s
   if (!sunny) return t * .7 + .05;
   sunK = sunAt(xf, pf);
   if (sunK) sunK *= 1 - clamp(shadow(x, y) * 2.2);
-  return t * (1 / MAP.gain + (1 - 1 / MAP.gain) * sunK) + .03;
+  return t * (.6 + .4 * sunK) + .03;                          // what is white in the sun is as light as anything gets
 }
 const EMBER = [36, 23, 14];                                    // what is dark is dark under a lamp too
 function lightOn(col) {
@@ -119,7 +312,6 @@ let treeX0 = 0, treeX1 = 0, treeTop = 0, treeFoot = 0;       // the box they sta
 const limbX = (s, t) => (1 - t) * (1 - t) * s.x1 + 2 * t * (1 - t) * s.cx + t * t * s.x2;
 const limbY = (s, t) => (1 - t) * (1 - t) * s.y1 + 2 * t * (1 - t) * s.cy + t * t * s.y2;
 const hidden = (x, y) => { const xf = fx(x), pf = fy(y); return pf > HEAD || xf < corner(pf) + .001 || xf > .52; };
-const inside = (p, x, y) => { let o = false; for (let i = 0, j = p.length - 1; i < p.length; j = i++) if ((p[i][1] > y) !== (p[j][1] > y) && x < (p[j][0] - p[i][0]) * (y - p[i][1]) / (p[j][1] - p[i][1]) + p[i][0]) o = !o; return o; };
 const maskAt = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : mask[((y / mCell) | 0) * mCols + ((x / mCell) | 0)];
 function buildTrees() {
   const crowns = []; limbs = [];
@@ -180,27 +372,34 @@ function mark(x, y, rad, v) {                                  // something thin
 }
 
 // ---------- the windows ----------
-// By day a window is what the map has there.  At night it has four corners and is lit or dark: the map has those
-// too, corner by corner in ten-thousandths of the photograph, for the houses near by.  Other strokes keep clear
-// of them then (3 and up: which window), and they are painted like everything else, stroke by stroke: upright
-// ones for the panes, dark ones for the bars between them.
+// By day a window is glass, cell by cell like the wall round it.  At night it has four corners and is lit or dark:
+// the corners are worked out from the floors of its house and where it is along them, for all that are not too far
+// up the street.  Other strokes keep clear of them then (3 and up: which window), and they are painted like
+// everything else, stroke by stroke: upright ones for the panes, dark ones for the bars between them.
 let panes = [], paneArea = 0;
 function buildWindows() {
-  const q = MAP.windows;
   panes = []; paneArea = 0;
-  for (let i = 0; i < q.length && panes.length < 250; i += 9) {
-    const pts = []; let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9;
-    for (let k = 0; k < 8; k += 2) { const x = px(q[i + k] / 1e4), y = py(q[i + k + 1] / 1e4); pts.push([x, y]); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
-    if (x1 < 0 || x0 > W || y1 < 0 || y0 > H) continue;
-    const w = { pts, lit: q[i + 8] === 1, x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: Math.max(1, pts[1][0] - pts[0][0]), h: Math.max(1, pts[3][1] - pts[0][1]), k: (i * .377) % 1 };
+  const add = q => {                                           // its corners on the photograph, clockwise from the upper left one
+    const pts = q.map(p => [px(p[0]), py(p[1])]), id = panes.length;
+    let x0 = 1e9, x1 = -1e9, y0 = 1e9, y1 = -1e9, seen = 0;
+    for (const p of pts) { x0 = Math.min(x0, p[0]); x1 = Math.max(x1, p[0]); y0 = Math.min(y0, p[1]); y1 = Math.max(y1, p[1]); }
+    if (x1 < 0 || x0 > W || y1 < 0 || y0 > H || id >= 250) return;
+    for (let cy = Math.max(0, Math.floor(y0 / mCell)); cy <= Math.min(mRows - 1, y1 / mCell); cy++) for (let cx = Math.max(0, Math.floor(x0 / mCell)); cx <= Math.min(mCols - 1, x1 / mCell); cx++) {
+      const x = (cx + .5) * mCell, y = (cy + .5) * mCell, k = inside(pts, x, y) ? what(fx(x), fy(y)) : SKY;
+      if (k !== SKY && k < STEP) { mask[cy * mCols + cx] = 3 + id; seen++; }   // not where the stairs hide it
+    }
+    if (!seen) return;
+    const w = { pts, lit: hash1(id * 7 + 3) < .42, x: (x0 + x1) / 2, y: (y0 + y1) / 2, w: Math.max(1, pts[1][0] - pts[0][0]), h: Math.max(1, pts[3][1] - pts[0][1]), k: (id * .377) % 1 };
     w.area = w.w * w.h; paneArea += w.area;
-    for (let cy = Math.max(0, Math.floor(y0 / mCell)); cy <= Math.min(mRows - 1, y1 / mCell); cy++) for (let cx = Math.max(0, Math.floor(x0 / mCell)); cx <= Math.min(mCols - 1, x1 / mCell); cx++)
-      if (inside(pts, (cx + .5) * mCell, (cy + .5) * mCell)) mask[cy * mCols + cx] = 3 + panes.length;
     panes.push(w);
-  }
+  };
+  for (const f of LFLOORS) for (const b of LBAYS) add([leftAt(f[0], b[0]), leftAt(f[0], b[1]), leftAt(f[1], b[1]), leftAt(f[1], b[0])]);
+  for (const f of FARFLOORS) for (const b of FARBAYS) add([[b[0], f[0]], [b[1], f[0]], [b[1], f[1]], [b[0], f[1]]]);
+  const bays = RBAYS.slice();
+  for (let s = BAY0; s < 5.6; s += BAY) bays.push([s, s + PANES]);
+  for (const f of RFLOORS) for (const b of bays) add([rightAt(f[0], b[1]), rightAt(f[0], b[0]), rightAt(f[1], b[0]), rightAt(f[1], b[1])]);
 }
 const along = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t];
-const CROSS = .36;                                             // how far down a window the bar across it is
 function paneStroke(w) {                                       // somewhere in a window
   const R = PP.R, p = w.pts, xf = fx(w.x), pf = fy(w.y), bars = w.lit && w.w > 6 * U, bw = Math.max(U, w.w * .08);
   if (bars && R() < .22) {                                     // the bars between its panes, dark against the light
@@ -229,23 +428,42 @@ function paneDab() {                                           // the windows on
 }
 
 // ---------- the rails ----------
-// The map has them as lines: from, to, how wide, how light, in ten-thousandths of the photograph.  The bollards
-// on the pavement are among them.  A rail that leaves the photograph goes on as it left.
+// Rails of steel run up the stairs from landing to landing, this way and that: [x and y at one end, at the other],
+// from the head of the stairs down.  Their posts: [x, top, foot].  Both are the thinner the farther up they are,
+// and light against the steps.  Those along the house on the right and round the low wall at its foot are dark
+// against the wall: the last of each, from DIM on.  The bollards on the pavement are of the same stuff: [x, top,
+// foot, how thick].  A rail that leaves the photograph goes on as it left.
+const RAILS = [[.513, .495, .584, .495], [.34, .496, .497, .509], [.306, .504, .393, .51], [.534, .505, .585, .493], [.283, .514, .365, .514], [.491, .52, .541, .515], [.37, .521, .547, .534],
+  [.547, .532, .597, .528], [.291, .534, .336, .53], [.429, .541, .475, .541], [.549, .543, .586, .542], [.259, .546, .295, .548], [.475, .548, .517, .551], [.293, .551, .418, .542],
+  [.378, .555, .603, .574], [.472, .573, .517, .577], [.414, .575, .462, .578], [.599, .582, .641, .586], [.239, .603, .442, .585], [.304, .606, .467, .619], [.395, .607, .606, .588],
+  [.516, .622, .652, .636], [.311, .628, .712, .664], [.673, .639, .726, .643], [.631, .653, .71, .646], [.503, .666, .576, .659], [.706, .673, .753, .674], [.28, .677, .351, .675],
+  [0, .71, .075, .602], [.075, .602, .118, .602], [.047, .681, .099, .681], [.146, .706, .48, .668], [.154, .733, .765, .663], [.327, .781, .623, .742], [.19, .785, .296, .782], [.218, .797, .306, .784],
+  [.721, .585, .781, .566], [.784, .573, .825, .623], [.802, .597, .841, .648], [.836, .649, .932, .643], [.933, .643, .995, .643], [.834, .669, .909, .668], [.94, .668, .975, .668]];
+const POSTS = [[.533, .477, .493], [.318, .482, .498], [.298, .484, .508], [.365, .485, .499], [.354, .486, .507], [.288, .487, .529], [.376, .493, .507], [.643, .495, .511], [.418, .497, .539],
+  [.515, .501, .518], [.548, .506, .541], [.671, .506, .524], [.312, .507, .527], [.482, .508, .542], [.491, .509, .549], [.597, .52, .539], [.297, .521, .544], [.539, .521, .54],
+  [.516, .534, .576], [.586, .535, .572], [.267, .546, .569], [.573, .55, .572], [.504, .556, .58], [.361, .561, .577], [.276, .568, .601], [.44, .569, .584], [.371, .571, .587],
+  [.453, .588, .623], [.536, .589, .613], [.624, .594, .627], [.556, .594, .625], [.646, .604, .624], [.124, .605, .624], [.345, .607, .655], [.22, .607, .662], [.335, .614, .679],
+  [.24, .617, .654], [.461, .628, .67], [.705, .638, .657], [.766, .641, .663], [.589, .642, .682], [.711, .649, .664], [.753, .661, .721], [.626, .667, .741], [.713, .679, .716],
+  [.481, .702, .751], [.323, .707, .742], [.164, .724, .774], [.322, .757, .772],
+  [.78, .572, .592], [.809, .61, .631], [.836, .642, .669], [.89, .649, .669]];
+const DIM = [36, 49], BOLLARDS = [[.385, .724, .832, .015], [.699, .722, .832, .0145], [.972, .722, .832, .0175]];
 let rails = [], railWeight = 0, railLength = 0;
 function buildRails() {
-  const q = MAP.rails, left = X0 - .02, right = fx(W) + .02;
+  const left = X0 - .02, right = fx(W) + .02;
   rails = []; railWeight = railLength = 0;
-  for (let i = 0; i < q.length; i += 6) {
-    let xa = q[i] / 1e4, ya = q[i + 1] / 1e4, xb = q[i + 2] / 1e4, yb = q[i + 3] / 1e4;
-    if (xa > xb) { let t = xa; xa = xb; xb = t; t = ya; ya = yb; yb = t; }
+  const add = (xa, ya, xb, yb, w, l) => {                      // from, to, how wide, how light (0 to 7)
     if (Math.abs(yb - ya) < (xb - xa) * .3) { if (xb > .994 && right > 1) xb = right; if (xa < .006 && left < 0) xa = left; }
-    const s = { x1: px(xa), y1: py(ya), x2: px(xb), y2: py(yb), w: Math.max(1.1 * U, q[i + 4] / 1e4 * PW), l: q[i + 5] };
-    if (Math.max(s.x1, s.x2) < 0 || Math.min(s.x1, s.x2) > W || Math.min(s.y1, s.y2) > H) continue;
+    const s = { x1: px(xa), y1: py(ya), x2: px(xb), y2: py(yb), w: Math.max(1.1 * U, w * PW), l };
+    if (Math.max(s.x1, s.x2) < 0 || Math.min(s.x1, s.x2) > W || Math.min(s.y1, s.y2) > H) return;
     s.len = Math.hypot(s.x2 - s.x1, s.y2 - s.y1) || 1; s.flat = Math.abs(s.y2 - s.y1) < Math.abs(s.x2 - s.x1);
     s.wt = s.len * (s.w + 2 * U); railWeight += s.wt; railLength += s.len;
     rails.push(s);
     for (let k = 0, n = Math.ceil(s.len / (mCell * .5)); k <= n; k++) mark(s.x1 + (s.x2 - s.x1) * k / n, s.y1 + (s.y2 - s.y1) * k / n, s.w / 2, 2);
-  }
+  };
+  const steel = (y, i) => 2.5 + 2.5 * smooth(.5, .68, y) + hash1(i * 13 + 1) - .5;   // far up the stairs it does not shine
+  RAILS.forEach((r, i) => add(r[0], r[1], r[2], r[3], .001 + ((r[1] + r[3]) / 2 - .48) * .009, i < DIM[0] ? steel(r[1], i) : .5));
+  POSTS.forEach((p, i) => add(p[0], p[1], p[0], p[2], .0011 + (p[2] - .49) * .013, i < DIM[1] ? steel(p[2], i + 50) : .5));
+  for (const b of BOLLARDS) add(b[0], b[1] + b[3] / 2, b[0], b[2], b[3], b[0] < .9 ? 2.5 : 1.2);
 }
 function railStroke() {                                        // a stretch of steel
   const R = PP.R; let k = R() * railWeight, s = rails[0];
@@ -300,12 +518,12 @@ function run(x, y, ca, sa, l, ok, step) {                      // how far a stro
 
 // ---------- walls, windows, steps ----------
 // Everything that is built is painted in level strokes, a cell high: floor by floor, step by step.
-let cw = 1, ch = 1;                                            // how big a cell of the map is in the picture
+let cw = 1, ch = 1;                                            // how big a cell is in the picture
 const LONG = [0, 9, 9, 8, 5, 3, 11, 13, 15];                  // how long a stroke each kind of thing gets
 function flatStroke(x, y, k) {
   const R = PP.R, xf = zx, pf = zy, l0 = lev, j = cellJ;
   // Stroke by stroke a cell high, in rows; on a big screen, where a cell is more than a stroke, the rows would show as steps
-  const rows = ch < 1.7 * U, w = rows ? Math.max(1.1 * U, ch) : 1.5 * U, yc = rows ? py((j + .5) / MH) : y;
+  const rows = ch < 1.7 * U, w = rows ? Math.max(1.1 * U, ch) : 1.5 * U, yc = rows ? py((j + .5) * ROW) : y;
   run(x, yc, 1, 0, (1.5 + R() * (LONG[k] - 1.5)) * Math.max(U, cw * .7), k < STEP ? q => q === k && lev === l0 : q => q === k && Math.abs(lev - l0) < 2, Math.max(1, cw * .5));   // stone is not as sharp as a window
   const a = reach[0], b = reach[1], l = k === STEP ? 3.2 + (l0 - 3.2) * (1 - farOff(xf, pf) * .5) : l0;   // far up the stairs light and dark are closer to each other
   let col = ramp(scaleOf(k), toneOf(x, y, xf, pf, l + .2 + R() * .6));
@@ -468,13 +686,13 @@ const place = {
       X0 = clamp(.43 - W / PW / 2, 0, Math.max(0, 1 - W / PW));
     }
     place.hz = py(HOR);
-    cw = PW / MW; ch = PH / MH;
+    cw = PW * CELL; ch = PH * ROW;
     const n = Math.ceil(W) + 1;
     tops = new Float32Array(n); skyX0 = n; skyX1 = -1;
     for (let i = 0; i < n; i++) {
-      const xf = fx(i), roof = xf < 0 || xf >= 1 ? 0 : roofs[xf * MW | 0];
-      tops[i] = roof ? py(roof / MH) : -1e4;
-      if (roof) { if (i < skyX0) skyX0 = i; skyX1 = i; }
+      const roof = roofAt(fx(i));
+      tops[i] = roof >= 0 ? py(roof) : -1e4;
+      if (roof >= 0) { if (i < skyX0) skyX0 = i; skyX1 = i; }
     }
     buildTrees(); buildWindows(); buildRails();
   },
