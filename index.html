@@ -66,10 +66,10 @@
   <span class="mini-lines"></span>
 </button>
 <nav class="controls" aria-label="Picture">
-  <button id="place-toggle" type="button" hidden>Kahlenberg</button>
-  <button id="season-toggle" type="button">summer</button>
-  <button id="weather-toggle" type="button">sunny</button>
-  <button id="theme-toggle" type="button">auto</button>
+  <span class="control" data-kind="place" hidden><button id="place-toggle" class="value" type="button">Kahlenberg</button></span>
+  <span class="control" data-kind="season"><button id="season-toggle" class="value" type="button">summer</button></span>
+  <span class="control" data-kind="weather"><button id="weather-toggle" class="value" type="button">sunny</button></span>
+  <span class="control" data-kind="theme"><button id="theme-toggle" class="value" type="button">auto</button></span>
 </nav>
 <script src="places/kahlenberg.js"></script>
 <script src="places/handelskai.js"></script>
@@ -88,5 +88,6 @@
 <script src="places/robinson.js"></script>
 <script src="scene.js"></script>
 <script src="postcard.js"></script>
+<script src="controls.js"></script>
 </body>
 </html>

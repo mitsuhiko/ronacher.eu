@@ -63,6 +63,9 @@ const PLACES = window.viennaPlaces || [];
 let placeIndex = PLACES.findIndex(p => p.id === qs.get('place'));
 if (placeIndex < 0) placeIndex = PLACES.length ? roll(PLACES.length) : 0;
 
+// What the weather is called on its button: the sun of a night is a clear sky.
+const weatherLabel = (w, night) => w === 'golden' ? (night ? 'clear' : 'golden hour') : w === 'sunny' && night ? 'clear' : w;
+
 const themeButton = document.getElementById('theme-toggle');
 const placeButton = document.getElementById('place-toggle');
 const seasonButton = document.getElementById('season-toggle');
@@ -72,20 +75,21 @@ function announce() {
   root.classList.toggle('night', night);
   root.dataset.season = season; root.dataset.weather = weather;
   if (place) root.dataset.place = place.id;
-  if (placeButton) { placeButton.hidden = PLACES.length < 2; if (place) { placeButton.textContent = place.name; placeButton.setAttribute('aria-label', 'Place: ' + place.name); } }
+  if (placeButton) { placeButton.closest('.control').hidden = PLACES.length < 2; if (place) { placeButton.textContent = place.name; placeButton.setAttribute('aria-label', 'Place: ' + place.name); } }
   if (themeButton) {
     themeButton.textContent = mode;
     themeButton.setAttribute('aria-label', 'Color theme: ' + mode);
   }
   if (seasonButton) seasonButton.textContent = season;
-  if (weatherButton) weatherButton.textContent = weather === 'golden' ? (night ? 'clear' : 'golden hour') : weather === 'sunny' && night ? 'clear' : weather;
+  if (weatherButton) weatherButton.textContent = weatherLabel(weather, night);
   window.dispatchEvent(new CustomEvent('vienna:change', { detail: { place: place && place.id, season, weather, night, mode } }));
 }
-if (themeButton) themeButton.addEventListener('click', () => {
-  mode = MODES[(MODES.indexOf(mode) + 1) % MODES.length];
+function setMode(m) {
+  mode = m;
   try { localStorage.setItem(THEME_KEY, mode); } catch (e) { /* ignore */ }
   announce(); retheme();
-});
+}
+if (themeButton) themeButton.addEventListener('click', () => setMode(MODES[(MODES.indexOf(mode) + 1) % MODES.length]));
 if (darkQuery) {
   const onScheme = () => { announce(); retheme(); };
   if (darkQuery.addEventListener) darkQuery.addEventListener('change', onScheme); else darkQuery.addListener(onScheme);
@@ -1018,7 +1022,7 @@ function resize() {
 // season and weather.  Every place in every season and weather comes round once, in an
 // order of chance, before any of them comes again; the buttons and a click on the picture
 // go straight to the next one.  ?seed= makes the order the same every time.
-let seasonClock = 0;
+let seasonClock = 0, paused = false;
 const sceneKey = (p, s, w) => p + '/' + s + '/' + w;
 const ALL_SCENES = [];
 for (let p = 0; p < places.length; p++) for (let s = 0; s < SEASONS.length; s++) for (const w of WEATHERS[SEASONS[s]]) ALL_SCENES.push({ p, s, w });
@@ -1057,6 +1061,39 @@ function nextScene() {
   show(4.5);
 }
 retheme = () => show(1.8);
+
+// What each button can be set to right now, for the fan that opens from it (controls.js): the weathers
+// only of the season it is, and those that look the same at night only once.  Choosing one is the same as
+// clicking through to it.
+function choices(kind) {
+  const night = wantNight();
+  if (kind === 'place') return places.map((p, i) => ({ value: p.id, label: p.name, current: i === placeIndex }));
+  if (kind === 'season') return SEASONS.map((s, i) => ({ value: s, label: s, current: i === seasonIndex }));
+  if (kind === 'theme') return MODES.map(m => ({ value: m, label: m, current: m === mode }));
+  if (kind !== 'weather') return [];
+  const out = [], now = weatherLabel(weather, night);
+  for (const w of WEATHERS[SEASONS[seasonIndex]]) {
+    const label = weatherLabel(w, night);
+    if (!out.some(c => c.label === label)) out.push({ value: w, label, current: label === now });
+  }
+  return out;
+}
+// Every name a button can ever show, so it can keep the room for the longest one.
+function labels(kind) {
+  if (kind === 'weather') return [...new Set(WEATHER_NAMES.flatMap(w => [weatherLabel(w, false), weatherLabel(w, true)]))];
+  return choices(kind).map(c => c.label);
+}
+function choose(kind, value) {
+  if (kind === 'theme') { if (MODES.includes(value) && value !== mode) setMode(value); return; }
+  if (choices(kind).some(c => c.value === value && c.current)) return;
+  if (kind === 'place') { const i = places.findIndex(p => p.id === value); if (i < 0) return; placeIndex = i; show(4.5); }
+  else if (kind === 'season') { const i = SEASONS.indexOf(value); if (i < 0) return; turn(i, false); show(4.5); }
+  else if (kind === 'weather') {
+    const i = WEATHERS[SEASONS[seasonIndex]].indexOf(value); if (i < 0) return;
+    weatherAt[seasonIndex] = i; weather = value; show(3.5);
+  }
+}
+Object.assign(window.vienna, { choices, labels, choose, pause(on) { paused = !!on; } });
 paintCv.addEventListener('click', nextScene);
 if (placeButton) placeButton.addEventListener('click', nextPlace);
 if (seasonButton) seasonButton.addEventListener('click', nextSeason);
@@ -1067,7 +1104,7 @@ function step(dt, draw) {
   if (!cur) return;
   time += dt;
   for (const p of places) p.tick(time);
-  if (!HOLD) { seasonClock += dt; if (seasonClock >= SEASON_SECONDS) nextScene(); }
+  if (!HOLD && !paused) { seasonClock += dt; if (seasonClock >= SEASON_SECONDS) nextScene(); }
   moveClouds(dt);
   paint(dt);
   if (draw) drawSprites();

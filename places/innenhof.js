@@ -14,7 +14,7 @@
  *  the ground are there in autumn only.
  *  scene.js paints the sky and says what a place has to bring along.
  * ------------------------------------------------------------------ */
-(window.viennaPlaces = window.viennaPlaces || []).push({ id: 'innenhof', name: 'Innenhof', make(kit) {
+(window.viennaPlaces = window.viennaPlaces || []).push({ id: 'innenhof', name: 'Courtyard', make(kit) {
 'use strict';
 const { PP, TAU, clamp, smooth, mix, pick, rng, hash1, vnoise, fbm, wind, spend, clipBand } = kit;
 
