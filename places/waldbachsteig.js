@@ -10,10 +10,11 @@
  *
  *  It is painted after a photograph taken in May, measured by hand:
  *  the saint part by part, the fence bay by bay, the wall, the bench.
- *  The cable that crossed its sky is not in it.  The lantern is made
- *  up, and so is what lies beyond the photograph: more of the wall and
- *  the trees on the left, the meadow, the path and the fruit trees
- *  under the hill on the right, the path at our feet.  It is an
+ *  The cable that crossed its sky is not in it, nor what is cut into
+ *  the pedestal.  The lantern is made up, and so is what lies beyond
+ *  the photograph: more of the wall and the trees on the left, the
+ *  meadow, the path and the fruit trees under the hill on the right,
+ *  the near end of the bench and the path at our feet.  It is an
  *  upright one: a wide screen keeps the saint on its left.
  *  scene.js paints the sky and says what a place has to bring along.
  * ------------------------------------------------------------------ */
@@ -148,161 +149,181 @@ function buildTrees() {
       grow(limbX(trunk, from), limbY(trunk, from), a, h * (.27 - Math.abs(a + Math.PI / 2) * .05) * (.85 + r() * .3), w * .55, 1);
     }
   }
-  mask = new Uint8Array(gCols * gRows); limbWeight = limbLength = 0; limbSum = new Float32Array(limbs.length);   // where a limb is (1), one of the bigger ones (4)
+  mask = sheet(0, 0, W, H, parts.cell); limbWeight = limbLength = 0; limbSum = new Float32Array(limbs.length);   // where a limb is (1), one of the bigger ones (4)
   limbs.forEach((s, i) => {
     limbWeight += s.len * (s.w + 2 * U); limbSum[i] = limbWeight; limbLength += s.len;
-    for (let k = 0, n = Math.ceil(s.len / (gCell * .5)); k <= n; k++) stamp(mask, s.depth < 3 ? 5 : 1, limbX(s, k / n), limbY(s, k / n), s.w / 2 + .3 * U, true);
+    for (let k = 0, n = Math.ceil(s.len / (mask.cell * .5)); k <= n; k++) stamp(mask, s.depth < 3 ? 5 : 1, limbX(s, k / n), limbY(s, k / n), s.w / 2 + .3 * U, true);
   });
 }
 const folAt = (x, y) => { const i = ((x - sway) / cCell) | 0, j = (y / cCell) | 0; return i < 0 || j < 0 || i >= cCols || j >= cRows ? -9 : crown[j * cCols + i]; };
-const maskAt = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : mask[((y / gCell) | 0) * gCols + ((x / gCell) | 0)];
+const maskAt = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : mask.of[((y / mask.cell) | 0) * mask.cols + ((x / mask.cell) | 0)];
 
 // ---------- what is drawn by hand ----------
 // The saint, the lantern, the fence and the bench are kept in a grid: which part of which of them a cell belongs
-// to, the one nearest to us that covers it.
-const STAR = 1, CLOAK = 2, BASE = 3, CASSOCK = 4, ROCHET = 5, CAPE = 6, HEAD = 7, CAP = 8, PALM = 9, HAND = 10, CROSS = 11, PLINTH = 12, LEDGE = 13, DIE = 14, SIDE = 15, WRIT = 16,
-  IRON = 40, LID = 50, PANE = 51, SLAT = 60, SEAT = 63, TUBE = 64;
-let parts = null, gCols = 0, gRows = 0, gCell = 2;
-const partAt = (x, y) => x < 0 || y < 0 || x >= W || y >= H ? 0 : parts[((y / gCell) | 0) * gCols + ((x / gCell) | 0)];
-function stamp(grid, id, x, y, rad, or) {                      // a round spot of it
-  const m = Math.ceil(rad / gCell), ix = Math.floor(x / gCell), iy = Math.floor(y / gCell);
+// to, the one nearest to us that covers it.  The saint has a finer one to himself: his head is no bigger than a
+// few strokes of the brush, and they have to know where to end.
+const STAR = 1, CLOAK = 2, BASE = 3, CASSOCK = 4, ROCHET = 5, CAPE = 6, NECK = 7, HAIR = 8, FACE = 9, BEARD = 10, CAP = 11, SHADE = 12, PALM = 13, HAND = 14, CROSS = 15, PLINTH = 20, LEDGE = 21, DIE = 22, SIDE = 23,
+  IRON = 40, LID = 50, PANE = 51, SLAT = 60, SEAT = 63, RIM = 64, TUBE = 65;
+let parts = null, fine = null;
+const sheet = (x, y, w, h, cell) => { const cols = Math.ceil(w / cell) + 1, rows = Math.ceil(h / cell) + 1; return { x, y, cell, cols, rows, x1: x + cols * cell, y1: y + rows * cell, of: new Uint8Array(cols * rows) }; };
+function partAt(x, y) {
+  if (x < 0 || y < 0 || x >= W || y >= H) return 0;
+  const g = parts.of[((y / parts.cell) | 0) * parts.cols + ((x / parts.cell) | 0)];
+  if (g || x < fine.x || y < fine.y || x >= fine.x1 || y >= fine.y1) return g;
+  return fine.of[(((y - fine.y) / fine.cell) | 0) * fine.cols + (((x - fine.x) / fine.cell) | 0)];
+}
+function stamp(g, id, x, y, rad, or) {                         // a round spot of it
+  const c = g.cell, m = Math.ceil(rad / c), ix = Math.floor((x - g.x) / c), iy = Math.floor((y - g.y) / c);
   for (let dy = -m; dy <= m; dy++) for (let dx = -m; dx <= m; dx++) {
     const cx = ix + dx, cy = iy + dy;
-    if (cx < 0 || cy < 0 || cx >= gCols || cy >= gRows || Math.hypot(dx, dy) * gCell > rad + gCell * .35) continue;
-    if (or) grid[cy * gCols + cx] |= id; else grid[cy * gCols + cx] = id;
+    if (cx < 0 || cy < 0 || cx >= g.cols || cy >= g.rows || Math.hypot(dx, dy) * c > rad + c * .35) continue;
+    if (or) g.of[cy * g.cols + cx] |= id; else g.of[cy * g.cols + cx] = id;
   }
 }
-function stampLine(id, xa, ya, xb, yb, rad) { for (let k = 0, n = Math.ceil(Math.hypot(xb - xa, yb - ya) / (gCell * .5)) || 1; k <= n; k++) stamp(parts, id, xa + (xb - xa) * k / n, ya + (yb - ya) * k / n, rad); }
-function stampPoly(id, pts) {                                  // a patch of the photograph
-  const p = pts.map(q => [px(q[0]), py(q[1])]);
+function stampLine(g, id, xa, ya, xb, yb, rad) { for (let k = 0, n = Math.ceil(Math.hypot(xb - xa, yb - ya) / (g.cell * .5)) || 1; k <= n; k++) stamp(g, id, xa + (xb - xa) * k / n, ya + (yb - ya) * k / n, rad); }
+function stampPoly(g, id, pts) {                               // a patch of the photograph
+  const p = pts.map(q => [px(q[0]), py(q[1])]), c = g.cell;
   let xa = 1e9, xb = -1e9, ya = 1e9, yb = -1e9;
   for (const q of p) { xa = Math.min(xa, q[0]); xb = Math.max(xb, q[0]); ya = Math.min(ya, q[1]); yb = Math.max(yb, q[1]); }
-  for (let j = Math.max(0, Math.floor(ya / gCell)); j <= Math.min(gRows - 1, Math.floor(yb / gCell)); j++)
-    for (let i = Math.max(0, Math.floor(xa / gCell)); i <= Math.min(gCols - 1, Math.floor(xb / gCell)); i++)
-      if (inPoly(p, (i + .5) * gCell, (j + .5) * gCell)) parts[j * gCols + i] = id;
+  for (let j = Math.max(0, Math.floor((ya - g.y) / c)); j <= Math.min(g.rows - 1, Math.floor((yb - g.y) / c)); j++)
+    for (let i = Math.max(0, Math.floor((xa - g.x) / c)); i <= Math.min(g.cols - 1, Math.floor((xb - g.x) / c)); i++)
+      if (inPoly(p, g.x + (i + .5) * c, g.y + (j + .5) * c)) g.of[j * g.cols + i] = id;
 }
 
-// The saint, from the back to the front: his cloak hanging from either arm, the cassock, the rochet over it, the fur
-// cape on his shoulders, head and biretta, the palm, the crucifix; under him the pedestal, its front turned a little
-// to the left.
+// The saint, from the back to the front: his cloak hanging from either arm, the cassock, the rochet over it and its
+// sleeves, the fur cape on his shoulders, his neck, hair, face and beard under the biretta, the palm and the hand
+// that holds it, the crucifix and the hand that holds that; under him the pedestal, its front turned a little to
+// the left.  His eye and his mouth are a dark stroke each.
 const FIGURE = [
   [CLOAK, [[.4588, .4344], [.445, .443], [.433, .4536], [.4256, .4712], [.428, .484], [.438, .492], [.45, .497], [.4555, .486], [.4534, .47], [.459, .458]]],
   [CLOAK, [[.5196, .4344], [.5325, .4488], [.5385, .4712], [.5389, .4968], [.533, .5045], [.526, .508], [.5154, .4872], [.512, .4744], [.524, .4696]]],
   [BASE, [[.462, .5765], [.5385, .5785], [.5395, .5845], [.461, .584]]],
   [CASSOCK, [[.464, .526], [.5, .5195], [.5282, .5205], [.5197, .536], [.526, .558], [.5367, .5725], [.538, .5795], [.4685, .578], [.4705, .559], [.466, .54]]],
   [ROCHET, [[.4566, .474], [.462, .452], [.49, .45], [.514, .452], [.516, .488], [.527, .508], [.5295, .519], [.524, .5245], [.5, .5205], [.48, .5225], [.4555, .529], [.4545, .5]]],
+  [ROCHET, [[.4395, .4605], [.4435, .4578], [.452, .458], [.4535, .4625], [.4535, .4695], [.4495, .4725], [.4435, .4705], [.4398, .466]]],
+  [ROCHET, [[.5195, .4605], [.5248, .4625], [.5262, .47], [.525, .4772], [.5198, .4772]]],
   [CAPE, [[.4816, .4222], [.4609, .4272], [.4588, .4344], [.463, .4552], [.4737, .4616], [.4823, .4568], [.4897, .4696], [.5004, .4688], [.5068, .4616], [.5132, .4552], [.5196, .4344], [.517, .4264], [.5004, .4214]]],
-  [HEAD, [[.4752, .4072], [.4935, .4035], [.4995, .408], [.4998, .4165], [.4955, .422], [.4895, .4235], [.4795, .421], [.476, .4165], [.4742, .4108]]],
-  [CAP, [[.4688, .3985], [.4923, .3952], [.4938, .4042], [.4748, .4078]]],
+  [NECK, [[.4812, .4212], [.4895, .4205], [.4975, .4222], [.4992, .4262], [.4905, .4288], [.4805, .4292]]],
+  [HAIR, [[.4905, .404], [.4955, .4062], [.4993, .409], [.4998, .4125], [.4992, .417], [.5005, .4215], [.4975, .4225], [.493, .42], [.4905, .416]]],
+  [FACE, [[.4768, .4052], [.4855, .404], [.4934, .4046], [.4925, .4105], [.4915, .416], [.4875, .4172], [.4805, .4152], [.476, .4137], [.4737, .4127], [.4757, .4096], [.4763, .4078]]],
+  [BEARD, [[.476, .4137], [.4805, .4152], [.4875, .4172], [.4915, .416], [.4925, .4185], [.4895, .421], [.4835, .4222], [.4766, .4213], [.4754, .4186], [.4768, .4161], [.4751, .4148]]],
+  [CAP, [[.4682, .3982], [.4925, .3951], [.4936, .4046], [.485, .404], [.477, .4048], [.4722, .4062]]],
   [PALM, [[.5143, .4616], [.511, .4488], [.5143, .4344], [.5197, .424], [.526, .4344], [.5303, .4424], [.525, .4552], [.5197, .4632]]],
+  [HAND, [[.5085, .4665], [.512, .4625], [.5185, .4615], [.5205, .466], [.52, .4745], [.515, .478], [.5095, .4765], [.508, .471]]],
 ];
+const EYE = [.4786, .4078, .4828, .4084], MOUTH = [.4772, .4162, .4814, .4167];
+const FIST = [[.4528, .4625], [.456, .4598], [.462, .4598], [.4642, .4635], [.4635, .4685], [.4585, .4705], [.4535, .4695]];   // the hand round the crucifix
 const PEDESTAL = [
   [PLINTH, [[.4605, .5835], [.5385, .5835], [.539, .5905], [.4585, .5905]]], [LEDGE, [[.446, .5895], [.54, .5895], [.5405, .5995], [.4465, .5995]]],
   [DIE, [[.451, .5995], [.52, .5995], [.52, .67], [.451, .67]]], [SIDE, [[.52, .5995], [.539, .5995], [.539, .67], [.52, .67]]],
-  [WRIT, [[.468, .6215], [.51, .6215], [.51, .6495], [.468, .6495]]],
 ];
-const CR = [.4487, .4224, .4684, .4744], ARM = [.431, .4296, .4662, .4272];   // the crucifix: its upright and its arm
-const HALO = [.488, .396, .019, .018], STARS = [-1.57, -2.7, -.44, .35, 2.8];  // the ring round his head, and where on it the stars sit
+const CR = [.4485, .424, .468, .476], ARM = [.431, .4328, .466, .4283];   // the crucifix: its upright and its arm
+const crX = pf => CR[0] + (pf - CR[1]) / (CR[3] - CR[1]) * (CR[2] - CR[0]), armY = xf => ARM[1] + (xf - ARM[0]) / (ARM[2] - ARM[0]) * (ARM[3] - ARM[1]);
+const HALO = [.488, .396, .0215, .018], STARS = [-1.57, -2.7, -.44, .35, 2.75];  // the ring round his head, and where on it the stars sit
 const starAt = i => [HALO[0] + Math.cos(STARS[i]) * HALO[2], HALO[1] + Math.sin(STARS[i]) * HALO[3]];
 const SB = [.42, .37, .545, .672];                             // the box all of him stands in
 const LAMP = [.578, .781], LB = [.571, .764, .585, .792];      // the lantern on the wall: its flame, its box
-// What is written on the pedestal, letter by letter: each a few lines in a box.
-const GLYPHS = {
-  S: [[[1, .12], [.55, 0], [.05, .22], [.5, .5], [.95, .78], [.5, 1], [0, .88]]], T: [[[0, 0], [1, 0]], [[.5, 0], [.5, 1]]], J: [[[.25, 0], [1, 0]], [[.7, 0], [.7, .8], [.4, 1], [.1, .8]]],
-  O: [[[.5, 0], [1, .3], [1, .7], [.5, 1], [0, .7], [0, .3], [.5, 0]]], H: [[[0, 0], [0, 1]], [[1, 0], [1, 1]], [[0, .5], [1, .5]]], N: [[[0, 1], [0, 0], [1, 1], [1, 0]]],
-  E: [[[1, 0], [0, 0], [0, 1], [1, 1]], [[0, .5], [.7, .5]]], P: [[[0, 1], [0, 0], [.8, 0], [1, .25], [.8, .5], [0, .5]]], M: [[[0, 1], [0, 0], [.5, .6], [1, 0], [1, 1]]], '.': [[[.35, .86], [.65, 1]]],
-};
-const WRITING = [['ST.JOH.', .4726, .5036, .6232, .631], ['NEPOM.', .4737, .5068, .633, .6408]];
-let letters = [];
 
 // The fence, bay by bay: from post to post it is u wide, from the upper rail (v = 0) to the lower one (v = 1) high.
-// From a flower in its middle four scrolls go out to the corners, two more ride on the upper rail.  [points, how thick]
-const curl = (cu, cv, ru, rv, a0, turns, tail) => { const p = tail.slice(); for (let i = 0; i <= 12; i++) { const t = i / 12, a = a0 + t * turns * TAU, r = 1 - t * .72; p.push([cu + Math.cos(a) * ru * r, cv + Math.sin(a) * rv * r]); } return p; };
+// Round a flower in its middle four scrolls curl into the corners, two more ride on the upper rail.  It was forged
+// by hand: no two bays came out alike.  [points, how thick, where snow lies (1 along it, 2 on top of it), what it
+// is: a bar, a scroll, a length of rail, the flower]
+const BAR = 0, SCROLL = 1, RAIL = 2, FLOWER = 3;
+const curl = (cu, cv, ru, rv, a0, turns, tail, n = 12) => { const p = tail.slice(); for (let i = 0; i <= n; i++) { const t = i / n, a = a0 + t * turns * TAU, r = 1 - t * .72; p.push([cu + Math.cos(a) * ru * r, cv + Math.sin(a) * rv * r]); } return p; };
 const BAY = [];
 for (const side of [0, 1]) {
   const m = p => side ? p.map(q => [1 - q[0], q[1]]) : p;
-  BAY.push([m(curl(.39, -.13, .075, .12, -1.9, 1.2, [[.02, -.04], [.1, -.1], [.2, -.2]])), 2.2, 2]);
-  BAY.push([m(curl(.2, .27, .12, .17, .7, -1.25, [[.47, .46], [.38, .4]])), 2.2, 2]);
-  BAY.push([m(curl(.2, .73, .12, .17, -.7, 1.25, [[.47, .54], [.38, .6]])), 2.2, 0]);
+  BAY.push([m(curl(.39, -.13, .075, .12, -1.9, 1.2, [[.02, -.04], [.1, -.1], [.2, -.2]])), 2.2, 2, SCROLL]);
+  for (const up of [1, 0]) {                                   // a small curl by the flower, a big one in the corner, and from the one to the other along the rail
+    const v = q => up ? q : [q[0], 1 - q[1]];
+    BAY.push([m(curl(.2, .27, .12, .17, 1.75, 1.2, curl(.425, .39, .032, .05, 1.57, -.7, [], 6).reverse()).map(v)), 2.2, up ? 2 : 0, SCROLL]);
+  }
 }
-for (let i = 0; i < 3; i++) BAY.push([[[i / 3, 0], [(i + 1) / 3, 0]], 2.8, 1], [[[i / 3, 1], [(i + 1) / 3, 1]], 2.8, 1], [[[i / 3, .5], [(i + 1) / 3, .5]], 2, 0]);
-BAY.push([[[.5, 0], [.5, 1]], 2.2, 0], [[[.5, .5]], 7, 0]);
-const TUBES = [                                                // the bench's arms, each a loop of bent tube, and what it stands on; the first four stand in front of the seat
-  [[.4618, .9694], [.4741, .9549], [.4973, .9514], [.5186, .9578], [.5252, .9723], [.5245, 1], [.515, 1.022], [.49, 1.027], [.468, 1.018], [.4612, .995], [.4618, .9694]], [[.478, .985], [.513, .988]],
-  [[.8763, .89], [.8898, .8737], [.94, .8722], [.9505, .8824], [.9459, .8925], [.9034, .8934]], [[.853, .845], [.855, .9027], [.8686, .9143]],
-  [[.499, .985], [.4836, .875]], [[.482, 1], [.482, 1.085]], [[.603, 1.055], [.603, 1.14]], [[.93, .945], [.93, .995]], [[.975, .95], [.975, 1]],
+for (let i = 0; i < 3; i++) BAY.push([[[i / 3, 0], [(i + 1) / 3, 0]], 2.8, 1, RAIL], [[[i / 3, 1], [(i + 1) / 3, 1]], 2.8, 1, RAIL], [[[i / 3, .5], [(i + 1) / 3, .5]], 2, 0, RAIL]);
+BAY.push([[[.5, 0], [.5, 1]], 2.2, 0, BAR], [[[.5, .5]], 14, 0, FLOWER]);
+// The bench stands on bent tube: at either end a loop for an arm and a strut the back is screwed to, and legs that
+// are lost in the grass.  The one near us we look down on.  [points, how thick, whether it stands in front of the
+// boards (1), or only in the grass, which grows over it (2)]
+const TUBES = [
+  [[[.4575, 1.072], [.459, 1], [.4612, .975], [.4741, .9549], [.4973, .9514], [.5186, .9578], [.5245, .975], [.5262, 1], [.5285, 1.072], [.521, 1.09], [.493, 1.096], [.465, 1.09], [.4575, 1.072]], .0095, 1],
+  [[[.869, .914], [.8745, .895], [.879, .881], [.889, .8745], [.938, .873], [.9495, .8805], [.9485, .891], [.938, .8955], [.9, .8965], [.8765, .8955]], .0075, 1],
+  [[[.4836, .875], [.499, .985], [.503, 1.004]], .0085, 0], [[[.851, .842], [.853, .9], [.858, .912], [.866, .9165]], .0085, 0],
+  [[[.489, 1.116], [.489, 1.15]], .008, 1], [[[.489, 1.15], [.489, 1.168]], .008, 2], [[[.972, .962], [.972, .985]], .0065, 1], [[[.972, .985], [.972, 1.01]], .0065, 2],
 ];
 let els = [], elSum = null, elWeight = 0, buckets = [], bucketW = 30, stampN = 1, iy0 = 0, iy1 = 0;
 function buildIron() {
   els = [];
-  const add = (pts, w, kind, mark) => {                        // mark: where snow lies on a piece of the fence (1 along it, 2 on top of it); whether a tube of the bench stands in front of its seat
-    const e = { pts, w, kind, mark, x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, len: 0, mx: 0, my: 0, seen: 0 };
+  const add = (pts, w, kind, mark, o) => {                     // o: what a piece of the fence is; whether a tube of the bench stands in front of its boards, or in the grass
+    const e = { id: els.length, pts, w, kind, mark, cum: [0], len: 0, x0: 1e9, x1: -1e9, y0: 1e9, y1: -1e9, seen: 0, top: 0, tx: 0, ty: 1e9,
+      taper: kind === IRON && o === SCROLL ? .45 : 0, knob: kind === IRON && o === SCROLL, lit: kind === TUBE ? 1 : o === SCROLL ? .4 : o === RAIL ? .75 : .6, front: kind === TUBE && o === 1, free: kind === TUBE && o === 2 };
     for (let i = 0; i < pts.length; i++) {
       const p = pts[i]; e.x0 = Math.min(e.x0, p[0]); e.x1 = Math.max(e.x1, p[0]); e.y0 = Math.min(e.y0, p[1]); e.y1 = Math.max(e.y1, p[1]);
-      if (i) e.len += Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]);
+      if (i) { e.len += Math.hypot(p[0] - pts[i - 1][0], p[1] - pts[i - 1][1]); e.cum.push(e.len); }
+      if (p[1] < e.ty) { e.ty = p[1]; e.tx = p[0]; e.top = e.len; }
     }
     if (e.x1 < -20 * U || e.x0 > W + 20 * U || e.y0 > H + 20 * U) return;
-    const m = pts[pts.length >> 1]; e.mx = pts.length === 2 ? (pts[0][0] + pts[1][0]) / 2 : m[0]; e.my = pts.length === 2 ? (pts[0][1] + pts[1][1]) / 2 : m[1];
     els.push(e);
+    if (e.free) return;
     const id = kind === TUBE ? TUBE : IRON, rad = w / 2 + .3 * U;
-    if (pts.length === 1) stamp(parts, id, pts[0][0], pts[0][1], w * .6);
-    for (let i = 1; i < pts.length; i++) stampLine(id, pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1], rad);
+    if (pts.length === 1) stamp(parts, id, pts[0][0], pts[0][1], w * .5);
+    for (let i = 1; i < pts.length; i++) stampLine(parts, id, pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1], rad);
   };
   const n0 = Math.max(-9, Math.floor(bayOf(Math.max(-3.5, fx(0)))) - 1);
   for (let n = n0; n <= 9; n++) {
     const gate = n === 6, big = n === 3 || n === 6 || n === 7 || n === 9, xp = postX(n), k = far(xp) * PH / 1100, thick = b => Math.max(.85 * U, b * k);
     const pt = (u, v, deep) => { const xf = postX(n + u); return [px(xf), py(ironY(v, xf, deep))]; };
-    if (n < 9) for (const [pts, w, mark] of BAY) add(pts.map(q => pt(q[0], q[1], gate)), thick(w), IRON, mark);
+    const odd = (j, i) => hash1((n + 20) * 131 + j * 17 + i) - .5, sag = (i, v) => (hash1((n * 3 + i + 90) * 7 + v * 40) - .5) * .028;   // how far a piece is off, how far a rail where two lengths of it meet
+    if (n < 9) BAY.forEach(([pts, w, mark, what], j) => {
+      const a = pts[0], last = pts.length - 1, s = 1 + odd(j, 1) * .12, du = odd(j, 2) * .02, dv = odd(j, 3) * .035;
+      add(pts.map((q, i) => what === SCROLL ? pt(a[0] + (q[0] - a[0]) * s + du * i / last, a[1] + (q[1] - a[1]) * s + dv * i / last, gate)
+        : what === RAIL ? pt(q[0], q[1] + sag(Math.round(q[0] * 3), q[1]), gate) : pt(q[0], q[1], gate)), thick(w * (what === SCROLL ? 1 + odd(j, 4) * .3 : 1)), IRON, mark, what);
+    });
+    const lean = odd(40, 1) * .016;
     if (big) {                                                 // a tall post, twisted towards its tip, a scroll on its shoulder
-      add([pt(0, -.5), pt(0, n === 3 ? 1.3 : 1.75)], thick(9), IRON, 0);
-      add([pt(0, -.95), pt(0, -.5)], thick(4.5), IRON, 0);
-      add(curl(-.085, -.5, .055, .09, .2, -1.2, [[0, -.22], [-.04, -.34]]).map(q => pt(q[0], q[1])), thick(2.2), IRON, 2);
+      add([pt(lean * .5, -.5), pt(0, n === 3 ? 1.3 : 1.75)], thick(9), IRON, 0, BAR);
+      add([pt(lean, -.95), pt(lean * .5, -.5)], thick(4.5), IRON, 0, BAR);
+      add(curl(-.085, -.5, .055, .09, .2, -1.2, [[0, -.22], [-.04, -.34]]).map(q => pt(q[0], q[1])), thick(2.2), IRON, 2, SCROLL);
     } else {
-      add([pt(0, n === 1 ? -.32 : -.4), pt(0, 1.3)], thick(3.2), IRON, 0);
-      if (n !== 1) for (const s of [-1, 1]) add([pt(0, -.25), pt(s * .04, -.33), pt(s * .055, -.27)], thick(2), IRON, 0);   // a lily on top
+      add([pt(lean, n === 1 ? -.32 : -.4), pt(0, 1.3)], thick(3.2), IRON, 0, BAR);
+      if (n !== 1) for (const s of [-1, 1]) add([pt(lean, -.25), pt(lean + s * .04, -.33), pt(lean + s * .055, -.27)], thick(2), IRON, 0, BAR);   // a lily on top
     }
   }
-  TUBES.forEach((t, i) => add(t.map(q => [px(q[0]), py(q[1])]), Math.max(1.6 * U, .0075 * PW), TUBE, i < 4 ? 1 : 0));
+  for (const [pts, w, o] of TUBES) {                           // bent, not folded: every corner is rounded off
+    const p = pts.map(q => [px(q[0]), py(q[1])]), loop = p.length > 2 && p[0][0] === p[p.length - 1][0] && p[0][1] === p[p.length - 1][1], r = loop ? [] : [p[0]];
+    for (let i = 0; i < p.length - 1; i++) { const a = p[i], b = p[i + 1]; r.push([a[0] * .75 + b[0] * .25, a[1] * .75 + b[1] * .25], [a[0] * .25 + b[0] * .75, a[1] * .25 + b[1] * .75]); }
+    r.push(loop ? r[0] : p[p.length - 1]);
+    add(p.length > 2 ? r : p, Math.max(1.6 * U, w * PW), TUBE, 1, o);
+  }
   elWeight = 0; elSum = new Float32Array(els.length);
   bucketW = 30 * U; buckets = []; for (let i = 0, n = Math.ceil(W / bucketW) + 1; i < n; i++) buckets.push([]);
   els.forEach((e, i) => {
-    elWeight += e.len + 12 * U; elSum[i] = elWeight;
+    elWeight += e.len + 6 * U; elSum[i] = elWeight;
     if (e.kind === IRON) for (let b = Math.max(0, (e.x0 / bucketW) | 0), n = Math.min(buckets.length - 1, (e.x1 / bucketW) | 0); b <= n; b++) buckets[b].push(e);
   });
   iy0 = py(.575); iy1 = py(.86);
 }
-// The bench: three slats to lean against, each by its four corners (left and right end of its upper edge, then of
-// its lower one), and the seat.
+// The bench: three slats to lean against and the seat, each by its four corners (left and right end of its upper
+// or back edge, then right and left end of its lower or front one), and the edge of the seat that is turned to us.
 const SLATS = [[.4656, .8737, .855, .8186, .8616, .8447, .478, .9085], [.4819, .9105, .8686, .8499, .8724, .8635, .4838, .9268], [.4838, .9294, .8724, .865, .8751, .8766, .4865, .9468]];
-const SEAT0 = [.478, 1.003], SEAT1 = [.8937, .9114], SEAT2 = [.6056, 1.0608], SEAT3 = [.9923, .9491];   // the ends of its back edge, of its front edge
+const SEATQ = [.478, 1.003, .8937, .9114, .9945, .947, .476, 1.1], RIMQ = [.476, 1.1, .9945, .947, .9925, .959, .479, 1.12];
+const board = q => [[q[0], q[1]], [q[2], q[3]], [q[4], q[5]], [q[6], q[7]]];
 function buildThings() {
-  gCell = 1.5 * U; gCols = Math.ceil(W / gCell) + 1; gRows = Math.ceil(H / gCell) + 1;
-  parts = new Uint8Array(gCols * gRows);
-  for (let i = 0; i < 5; i++) { const s = starAt(i); stamp(parts, STAR, px(s[0]), py(s[1]), Math.max(1.5 * U, .0042 * PW)); }
-  for (const [id, pts] of FIGURE) stampPoly(id, pts);
-  stamp(parts, HAND, px(.5155), py(.468), Math.max(1.5 * U, .0078 * PW));
-  stampLine(CROSS, px(ARM[0]), py(ARM[1]), px(ARM[2]), py(ARM[3]), Math.max(U, .0034 * PW));
-  stampLine(CROSS, px(CR[0]), py(CR[1]), px(CR[2]), py(CR[3]), Math.max(U, .0036 * PW));
-  stamp(parts, HAND, px(.4585), py(.4635), Math.max(1.4 * U, .0062 * PW));
-  for (const [id, pts] of PEDESTAL) stampPoly(id, pts);
+  parts = sheet(0, 0, W, H, 1.5 * U);
+  fine = sheet(px(SB[0]), py(SB[1]), (SB[2] - SB[0]) * PW, (SB[3] - SB[1]) * PH, Math.max(.5, .5 * U));
+  for (let i = 0; i < 5; i++) { const s = starAt(i); stamp(fine, STAR, px(s[0]), py(s[1]), Math.max(1.5 * U, .0042 * PW)); }
+  for (const [id, pts] of FIGURE) stampPoly(fine, id, pts);
+  for (const s of [EYE, MOUTH]) stampLine(fine, SHADE, px(s[0]), py(s[1]), px(s[2]), py(s[3]), Math.max(.5 * U, .0009 * PH));
+  stampLine(fine, CROSS, px(ARM[0]), py(ARM[1]), px(ARM[2]), py(ARM[3]), Math.max(U, .0036 * PW));
+  stampLine(fine, CROSS, px(CR[0]), py(CR[1]), px(CR[2]), py(CR[3]), Math.max(U, .0038 * PW));
+  stampPoly(fine, HAND, FIST);
+  for (const [id, pts] of PEDESTAL) stampPoly(fine, id, pts);
   buildIron();
-  stampPoly(LID, [[LB[0], LB[1] + .007], [LAMP[0], LB[1]], [LB[2], LB[1] + .007], [LB[2], LB[1] + .0095], [LB[0], LB[1] + .0095]]);
-  stampPoly(PANE, [[LB[0] + .0015, LB[1] + .0095], [LB[2] - .0015, LB[1] + .0095], [LB[2] - .0015, LB[3] - .0035], [LB[0] + .0015, LB[3] - .0035]]);
-  stampPoly(LID, [[LB[0], LB[3] - .0035], [LB[2], LB[3] - .0035], [LB[2], LB[3]], [LB[0], LB[3]]]);
-  SLATS.forEach((s, i) => stampPoly(SLAT + i, [[s[0], s[1]], [s[2], s[3]], [s[4], s[5]], [s[6], s[7]]]));
-  stampPoly(SEAT, [SEAT0, SEAT1, [.9884, .9352], [.9962, .9433], SEAT3, SEAT2]);
-  for (const e of els) if (e.kind === TUBE && e.mark) for (let i = 1; i < e.pts.length; i++) stampLine(TUBE, e.pts[i - 1][0], e.pts[i - 1][1], e.pts[i][0], e.pts[i][1], e.w / 2 + .3 * U);
-  letters = [];
-  for (const [text, xa, xb, ya, yb] of WRITING) {
-    let n = 0; for (const ch of text) n += ch === '.' ? .5 : 1;
-    const slot = (xb - xa) / n;
-    let x = xa;
-    for (const ch of text) {
-      const w = ch === '.' ? slot * .5 : slot, bx = px(x + w * .14), bw = w * .72 * PW, by = py(ya), bh = (yb - ya) * PH;
-      letters.push({ x0: bx, x1: bx + bw, y0: by, y1: by + bh, lines: GLYPHS[ch].map(l => l.map(q => [bx + q[0] * bw, by + q[1] * bh])) });
-      x += w;
-    }
-  }
+  stampPoly(parts, LID, [[LB[0], LB[1] + .007], [LAMP[0], LB[1]], [LB[2], LB[1] + .007], [LB[2], LB[1] + .0095], [LB[0], LB[1] + .0095]]);
+  stampPoly(parts, PANE, [[LB[0] + .0015, LB[1] + .0095], [LB[2] - .0015, LB[1] + .0095], [LB[2] - .0015, LB[3] - .0035], [LB[0] + .0015, LB[3] - .0035]]);
+  stampPoly(parts, LID, [[LB[0], LB[3] - .0035], [LB[2], LB[3] - .0035], [LB[2], LB[3]], [LB[0], LB[3]]]);
+  SLATS.forEach((s, i) => stampPoly(parts, SLAT + i, board(s)));
+  stampPoly(parts, SEAT, board(SEATQ)); stampPoly(parts, RIM, board(RIMQ));
+  for (const e of els) if (e.front) for (let i = 1; i < e.pts.length; i++) stampLine(parts, TUBE, e.pts[i - 1][0], e.pts[i - 1][1], e.pts[i][0], e.pts[i][1], e.w / 2 + .3 * U);
 }
 
 // ---------- whose a point is ----------
@@ -318,13 +339,16 @@ function treeAt(x, y) {                                        // leaves, a limb
   if (!bare && v > thin) return LEAVES;
   return maskAt(x, y) & (bare || v < -8 ? 1 : 4) ? LIMB : 0;    // among leaves the twigs are not to be seen
 }
+// While it is in leaf the bed grows through the fence: here and there something stands in front of it, the more the nearer its foot.
+const grown = (xf, pf) => { const a = ironY(.3, xf); return pf > a && xf < WEND && vnoise(xf * 34 + 7, pf * 50) > .86 - .17 * clamp((pf - a) / (.075 * far(xf))); };
 function zone(x, y) {
-  const i = col(x), g = zp = partAt(x, y);
+  const i = col(x);
+  let g = zp = partAt(x, y);
   zx = fx(x); zy = fy(y);
   if (g >= SLAT) return BENCH;
   if (y > grassY[i]) return (zx > 1.05 && Math.abs(zx - pathX(zy)) < pathW(zy)) || (zy > 1.1 && zy > NEAR + (vnoise(zx * 20, 3.3) - .5) * .03) ? PATH : GRASS;
   if (g >= LID) return LANTERN;
-  if (g === IRON) return FENCE;
+  if (g === IRON) { if (bare || y > coping[i] || !grown(zx, zy)) return FENCE; g = zp = 0; }
   if (y > coping[i]) return WALL;
   if (y > bedY[i]) return BEDS;
   if (g) return STATUE;
@@ -370,13 +394,23 @@ const green = t => t < .25 ? mix(pal.folDeep, pal.folDark, t / .25) : t < .55 ? 
 // ---------- the hill, the hedge, the trees ----------
 let fx0 = 0, fx1 = 0, fy0 = 0, fy1 = 0;                        // the box the saint stands in, in the picture, and a little around it
 const hewn = g => g > 0 && g < IRON;
-const byFigure = (x, y, r) => x > fx0 && x < fx1 && y > fy0 && y < fy1 && (hewn(partAt(x - r, y)) || hewn(partAt(x + r, y)) || hewn(partAt(x, y - r)) || hewn(partAt(x, y + r)));   // whether a stroke as long as r would run over him
+let ax = 0, ay = 0;
+function byFigure(x, y, r) {                                   // whether a stroke as long as r would run over him, and which way (ax, ay) lies clear of him
+  ax = ay = 0;
+  if (x <= fx0 || x >= fx1 || y <= fy0 || y >= fy1) return false;
+  for (let d = r; d > U; d *= .5) {
+    const a = hewn(partAt(x - d, y)), b = hewn(partAt(x + d, y)), c = hewn(partAt(x, y - d)), e = hewn(partAt(x, y + d));
+    if (a || b || c || e) { ax = (a ? 1 : 0) - (b ? 1 : 0); ay = (c ? 1 : 0) - (e ? 1 : 0); return true; }
+  }
+  return false;
+}
 function hillStroke(x, y) {
-  const R = PP.R, xf = zx, pf = zy, k = R(), sz = .75 * U;
+  const R = PP.R, xf = zx, pf = zy, k = R(), sz = .75 * U, by = byFigure(x, y, 5.5 * sz);   // beside the saint the dabs are small and keep off him: his outline is to stay clean
   veil(.8);
+  if (by) { x += ax * 1.2 * U; y += ay * 1.2 * U; }
   if (bare) {                                                  // a bare wood on a slope: the ground shows through, brown or white
     const g = white ? mix(pal.twigs[2], pal.snow, white * .85) : mix(pal.twigs[2], pal.meadow[2], .3);
-    if (k < .55) PP.dab(x, y, (2.5 + R() * 4) * sz, mix(mix(g, pal.twigs[1], .3 + .4 * vnoise(xf * 40, pf * 90)), pal.haze, .35), { a: .85, den: .6, core: .5, s: 2 * U });
+    if (k < .55 || by) PP.dab(x, y, by ? 1.3 * sz : (2.5 + R() * 4) * sz, mix(mix(g, pal.twigs[1], .3 + .4 * vnoise(xf * 40, pf * 90)), pal.haze, .35), { a: .85, den: by ? 1.2 : .6, core: .5, s: by ? U : 2 * U });
     else { const l = (4 + R() * 7) * sz; PP.line([[x, y], [x + (R() - .5) * 3 * U, y - l]], mix(pal.twigs[R() < .5 ? 0 : 1], pal.haze, .35), (.8 + R() * .8) * U, { pass: 1, a: .75 }); }
     return;
   }
@@ -384,10 +418,11 @@ function hillStroke(x, y) {
   let c = green(clamp(.2 + vnoise(xf * 110, pf * 150 + 3) * .65 + (fbm(xf * 9 + 1, pf * 14) - .5) * .5 + (R() - .5) * .2));
   if (pal.accent && k > (season === 'spring' ? .985 : .92)) c = pick(pal.accent, R());   // a wild cherry in flower here and there
   const sd = shadow(x, y); if (sd) c = mix(c, pal.folDark, sd * .4);
-  PP.dab(x, y, (1.8 + R() * 2.6) * sz, mix(c, pal.haze, .3), { a: .88, den: .8, core: .6, s: 1.5 * U, sx: 1.2, sy: .85 });
+  PP.dab(x, y, by ? 1.3 * sz : (1.8 + R() * 2.6) * sz, mix(c, pal.haze, .3), { a: .88, den: by ? 1.2 : .8, core: .6, s: by ? U : 1.5 * U, sx: 1.2, sy: .85 });
 }
 function thicket(x, y, top, behind) {                          // bare twigs, and what shows between them
   const R = PP.R, q = R(), depth = clamp((y - top) / (.2 * PH));
+  if (byFigure(x, y, 7 * U)) { PP.dab(x + ax * 1.2 * U, y + ay * 1.2 * U, 1.3 * U, white && q < .2 * white ? pal.snow : mix(behind, pal.twigs[1], .3 + depth * .45), { a: .85, den: 1.2, core: .6, s: U }); return; }   // no twig across the saint
   if (white && q < .2 * white + .06) { snowDab(x, y, (2 + R() * 3.5) * U); return; }
   if (q < .42) { PP.dab(x, y, (3 + R() * 5) * U, mix(behind, pal.twigs[1], .3 + depth * .45), { a: .8, den: .5, core: .4, s: 2.2 * U }); return; }
   const a = -Math.PI / 2 + (R() - .5) * (q < .72 ? .5 : 2.2), l = Math.min((6 + R() * 14) * U, (y - top) * 1.2 + 5 * U), ca = Math.cos(a) * l, sa = Math.sin(a) * l;
@@ -395,6 +430,7 @@ function thicket(x, y, top, behind) {                          // bare twigs, an
 }
 function hedgeStroke(x, y) {
   const R = PP.R, xf = zx, pf = zy, top = hedgeY[col(x)], k = R(), sz = .85 * U;
+  let ex = 9 * U, ey = ex;                                     // how far the stroke reaches: the fence wants to know
   veil(.5);
   if (bare) thicket(x, y, top, mix(mix(pal.twigs[2], pal.haze, .5), white ? pal.snow : pal.meadow[2], .3));
   else {
@@ -406,12 +442,13 @@ function hedgeStroke(x, y) {
       let c = green(lum);
       if (pal.accent && season === 'autumn' && lum > .3 && k > .9) c = pick(pal.accent, R());
       const sd = shadow(x, y); if (sd) c = mix(c, pal.folDeep, sd * .4);
-      const a = R() * Math.PI, l = (3 + R() * 6) * sz;
-      if (byFigure(x, y, l)) PP.dab(x, y, 1.5 * sz, c, { a: .9, den: 1.2, core: .7, s: 1.2 * U, jit: 8 });
-      else PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (3 + R() * 4.5) * sz, c, { a: .86, sp: 1.3 * U, dry: .2, jit: 10 });
+      const a = R() * Math.PI, l = (3 + R() * 6) * sz, wd = (3 + R() * 4.5) * sz;
+      ex = Math.abs(Math.cos(a)) * l + wd * .6; ey = Math.abs(Math.sin(a)) * l + wd * .6;
+      if (byFigure(x, y, l)) PP.dab(x + ax * 1.2 * U, y + ay * 1.2 * U, 1.3 * sz, c, { a: .9, den: 1.3, core: .7, s: U, jit: 8 });
+      else PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, wd, c, { a: .86, sp: 1.3 * U, dry: .2, jit: 10 });
     }
   }
-  if (y > iy0 - 8 * U) ironOver(x - 9 * U, y - 9 * U, x + 9 * U, y + 9 * U);
+  if (y > iy0 - 8 * U) ironOver(x - ex, y - ey, x + ex, y + ey);
 }
 const treeOff = xf => xf > 1.1 ? .62 : .3;                      // the fruit trees stand far off, under the hill
 function leafStroke(x, y) {                                    // the walnut and its neighbours
@@ -425,7 +462,7 @@ function leafStroke(x, y) {                                    // the walnut and
   if (pal.accent && season === 'autumn' && k > .9) c = pick(pal.accent, R());
   const sd = shadow(x, y); if (sd) c = mix(c, pal.folDeep, sd * .4);
   const a = R() * Math.PI, l = (3 + R() * 6) * sz;
-  if (byFigure(x, y, l)) PP.dab(x, y, 1.5 * sz, c, { a: .9, den: 1.2, core: .7, s: 1.2 * U, jit: 8 });
+  if (byFigure(x, y, l)) PP.dab(x + ax * 1.2 * U, y + ay * 1.2 * U, 1.3 * sz, c, { a: .9, den: 1.3, core: .7, s: U, jit: 8 });
   else PP.brush(x - Math.cos(a) * l, y - Math.sin(a) * l, x + Math.cos(a) * l, y + Math.sin(a) * l, (3 + R() * 4.5) * sz, c, { a: .87, sp: 1.3 * U, dry: .18, jit: 9 });
 }
 function limbStroke() {                                        // a stretch of bark
@@ -448,12 +485,14 @@ function limbStroke() {                                        // a stretch of b
 // ---------- the bed ----------
 function bedStroke(x, y) {                                     // whatever has grown where a garden was: peonies, nettles, long grass
   const R = PP.R, xf = zx, pf = zy, depth = (y - bedY[col(x)]) / PH, sz = U * clamp(.8 + (pf - .6) * 2.4, .75, 1.35), k = R();
+  let xe = x, ye = y, r = 5 * sz;                              // where the stroke ends and how wide it is: the fence wants to know
   lightAt(xf, pf); veil(.22);
-  if (white && k < white * .8) snowDab(x, y, (2 + R() * 3) * sz);
+  if (white && k < white * .8) { r = (2 + R() * 3) * sz; snowDab(x, y, r); r *= 1.8; }
   else if (bare || (k < .6 && reeds(xf) > .5 && depth < .075)) {   // blades, or the stalks the winter has left
     const a = -Math.PI / 2 + (R() - .5) * .8 + wind(time) * .08, l = (bare ? 4 + R() * 8 : 7 + R() * 11) * sz;
     const c = bare ? ramp(pal.bed, .15 + R() * .7) : mix(ramp(pal.bed, .3 + R() * .55), pal.straw, R() * .3);
-    PP.brush(x, y, x + Math.cos(a) * l, y + Math.sin(a) * l, (1 + R() * .9) * sz, c, { a: .88, jit: 8, dry: .12, sp: 1.1 * U, bow: .2 });
+    xe = x + Math.cos(a) * l; ye = y + Math.sin(a) * l; r = 2 * sz + l * .1;
+    PP.brush(x, y, xe, ye, (1 + R() * .9) * sz, c, { a: .88, jit: 8, dry: .12, sp: 1.1 * U, bow: .2 });
   } else if (pal.peony && k > .96 && xf < .47 && depth < .06) {   // the peonies are out
     const r = (2.2 + R() * 1.8) * sz;
     PP.dab(x, y, r, pal.peony[R() < .5 ? 0 : 1], { a: .95, den: 1.6, core: .85, s: 1.2 * U, jit: 5 }); PP.dab(x - r * .2, y - r * .25, r * .5, pal.peony[2], { a: .9, den: 1.4, core: .7, s: U, jit: 4 });
@@ -461,30 +500,30 @@ function bedStroke(x, y) {                                     // whatever has g
   else {                                                       // leaves: light on top, dark in among them
     let c = ramp(pal.bed, clamp(.5 + (fbm(xf * 30 + 2, pf * 40) - .5) * 1.7 + (R() - .5) * .3 + .25 * smooth(.035, 0, depth) - .25 * smooth(.03, .12, depth)));
     const sd = shadow(x, y); if (sd) c = mix(c, pal.bed[0], sd * .45);
-    const a = -Math.PI / 2 + (R() - .5) * 2.4, l = (2.5 + R() * 4) * sz;
-    PP.brush(x, y, x + Math.cos(a) * l, y + Math.sin(a) * l, (1.6 + R() * 2) * sz, c, { a: .9, jit: 8, dry: .1, sp: 1.15 * U, bow: .25 });
+    const a = -Math.PI / 2 + (R() - .5) * 2.4, l = (2.5 + R() * 4) * sz, wd = (1.6 + R() * 2) * sz;
+    xe = x + Math.cos(a) * l; ye = y + Math.sin(a) * l; r = wd * .6 + l * .13 + .5 * U;
+    PP.brush(x, y, xe, ye, wd, c, { a: .9, jit: 8, dry: .1, sp: 1.15 * U, bow: .25 });
   }
-  if (y > iy0 - 8 * U) ironOver(x - 8 * sz, y - 14 * sz, x + 8 * sz, y + 8 * sz);
+  if (y > iy0 - 8 * U) ironOver(Math.min(x, xe) - r, Math.min(y, ye) - r, Math.max(x, xe) + r, Math.max(y, ye) + r);
 }
 
 // ---------- the saint ----------
-function writStroke(x, y) {                                    // the stone, and what is cut into it: ST. JOH. NEPOM.
-  const R = PP.R, l = (2 + R() * 3) * U, w = 1.8 * U, c = ramp(pal.figure, .7 + (R() - .5) * .12 - (wet ? .08 : 0));
-  run(x, y, 1, 0, l, z => z === STATUE && zp === WRIT, U);
-  const xa = x - reach[0], xb = x + reach[1];
-  PP.brush(xa, y, xb, y, w, c, { a: .94, jit: 4, dry: .04, bow: 0, sp: 1.1 * U });
-  const lw = Math.max(.8, .0011 * PH), ink = mix(pal.writ, pal.figure[0], .3);
-  for (const g of letters) if (g.x1 > xa - U && g.x0 < xb + U && g.y1 > y - w && g.y0 < y + w) for (const ln of g.lines) PP.line(ln, ink, lw, { pass: 1, wob: .1 * U, a: .9, sharp: 1, step: 999, jit: 3 });
-  if (fy(y) > .643 && R() < .3) PP.line([[x, y - 1.5 * U], [x + (R() - .5) * U, y + 1.5 * U]], ink, lw, { pass: 1, wob: .1 * U, a: .6, step: 999 });   // a year under it, worn away
-}
+// He is small, and all of him is stone: every part gets strokes that follow its form and end where it ends, light
+// where it turns to the light and dark where it turns away.
 function figureStroke(x, y) {
   const R = PP.R, p = zp, xf = zx, pf = zy, side = clamp((xf - .49) / .05, -1, 1) * (evening ? -1 : 1);   // the light comes from the left; in the evening from the right, and low
   lightAt(xf, pf); veil(.26);
-  if (p === STAR) { PP.dab(x, y, Math.max(1.2 * U, .003 * PW), night ? mix(pal.starGold, pal.star, .25) : pal.starGold, { a: .95, den: 2.2, core: .9, s: U, jit: 4 }); return; }
+  if (p === STAR) {                                            // rusty gold: a ray of it, from its middle
+    let sx = 0, sy = 0, near = 1e9;
+    for (let i = 0; i < 5; i++) { const s = starAt(i), d = Math.hypot(px(s[0]) - x, py(s[1]) - y); if (d < near) { near = d; sx = px(s[0]); sy = py(s[1]); } }
+    const a = ((R() * 5) | 0) / 5 * TAU - Math.PI / 2, r = Math.max(1.7 * U, .0046 * PW);
+    if (partAt(sx + Math.cos(a) * r, sy + Math.sin(a) * r) > STAR) return;   // not across his cap
+    PP.brush(sx - Math.cos(a) * r * .2, sy - Math.sin(a) * r * .2, sx + Math.cos(a) * r, sy + Math.sin(a) * r, U, night ? mix(pal.starGold, pal.star, .25) : pal.starGold, { a: .95, jit: 5, dry: 0, bow: 0, sp: U });
+    return;
+  }
   if (white && R() < white && !partAt(x, y - Math.max(2.2 * U, .0055 * PH))) { snowDab(x, y - U, (1.5 + R()) * U); return; }   // snow lies on whatever of him looks up
-  if (p === WRIT) { writStroke(x, y); return; }
-  const mine = z => z === STATUE && zp === p, o = { a: .95, jit: 4, dry: .03, bow: 0, sp: 1.1 * U }, e = Math.max(1.6 * U, .0028 * PW);
-  let lum, set = pal.figure, ca = 0, sa = 1, l = (2 + R() * 4) * U, w = (1.3 + R() * .9) * U, dab = 0;
+  const mine = z => z === STATUE && zp === p, e = Math.max(1.6 * U, .0028 * PW), up = Math.max(U, .0017 * PH);
+  let lum, set = pal.figure, ca = 0, sa = 1, l = (2 + R() * 4) * U, w = (1.3 + R() * .9) * U, small = p >= NECK && p <= CROSS;
   const grime = smooth(.45, .8, fbm(xf * 150 + 3, pf * 190));
   if (p === CLOAK) {                                           // what paint is left on it is red; its inside is in the shade
     set = pal.robe; lum = .6 + (vnoise(xf * 380 + pf * 90, 1.3) - .5) * .5 - .34 * (xf < .49 ? smooth(.444, .455, xf) : smooth(.531, .521, xf));
@@ -493,37 +532,48 @@ function figureStroke(x, y) {
     lum = .76 - .36 * smooth(.012, .002, Math.abs(xf - (.487 + (pf - .52) * .62))) + (vnoise((xf + pf * .5) * 600, 7) - .5) * .3; ca = .45; sa = .89;
   } else if (p === ROCHET) {                                   // white linen, a hem of lace
     lum = .92 + (vnoise(xf * 700, 2.2 + pf * 8) - .5) * .42;
-    if (pf > .513 + (xf - .49) * .12) { lum = Math.floor(xf * 900) & 1 ? .95 : .55; l = 1.5 * U; }
-  } else if (p === CAPE) { set = pal.fur; lum = .64 + (fbm(xf * 260, pf * 300) - .5) * 1.2; dab = 1.25; }   // fur, grey and black with weather
-  else if (p === HEAD) {                                       // he looks to the left: the brow in the shade of his cap, the beard; his hair behind
-    lum = xf > .4925 ? .5 + (R() - .5) * .2 : pf > .4135 + (xf - .4775) * .31 ? .7 + (vnoise(xf * 900, pf * 900) - .5) * .5 : pf > .4082 && pf < .41 && xf < .486 ? .32 : .95;
-    dab = 1;
-  } else if (p === CAP) { lum = pf < .3995 + (.4923 - xf) * .12 ? .7 : .4; ca = 1; sa = -.14; }
-  else if (p === PALM) { lum = .9 - (((xf * 1.3 + pf) * 420) % 1 < .3 ? .34 : 0); ca = .2; sa = -.98; }
-  else if (p === HAND) { lum = .9; dab = 1.2; }
-  else if (p === CROSS) {                                      // the upright, or the arm; on it the body, small and pale
-    const arm = xf < .4455 || (xf < .466 && pf < .433 && Math.abs(pf - (ARM[1] + (xf - ARM[0]) / (ARM[2] - ARM[0]) * (ARM[3] - ARM[1]))) < .0034);
-    lum = .3 + (R() - .5) * .12;
-    if (arm) { ca = 1; sa = -.09; } else { ca = (CR[2] - CR[0]) * PW; sa = (CR[3] - CR[1]) * PH; const q = 1 / Math.hypot(ca, sa); ca *= q; sa *= q; }
-    if (pf > .431 && pf < .456 && Math.abs(xf - (CR[0] + (pf - CR[1]) / (CR[3] - CR[1]) * (CR[2] - CR[0]))) < .0022) { lum = .8; dab = 1; }
+    if (pf > .513 + (xf - .49) * .12) { lum = Math.floor(xf * 330) & 1 ? .96 : .58; l = 1.6 * U; w = 1.2 * U; }
+  } else if (p === CAPE) {                                     // fur, grey and black with weather: short strokes, all hanging down
+    set = pal.fur; lum = .62 + (fbm(xf * 260, pf * 300) - .5) * 1.3 + (R() - .5) * .16; ca = .12; sa = .99; l = (1.2 + R() * 2) * U; w = (1.1 + R() * .8) * U;
+  } else if (p === CAP) {                                      // the biretta: the horn it turns to us in the shade, its front in the light, dark again where it turns away
+    lum = (xf < .4728 ? .1 : .3 + smooth(.473, .486, xf) * .16 - smooth(.4885, .493, xf) * .3 + (vnoise(xf * 800, pf * 800) - .5) * .12) - (partAt(x, y + up) === CAP ? 0 : .1);
+    if (R() < .6) { ca = .986; sa = -.168; } else { ca = .36; sa = .93; }   // along its upper edge, or down its side
+    l = (2 + R() * 3) * U; w = (1.1 + R() * .5) * U;
+  } else if (p === FACE) {                                     // he looks to the left: brow and nose in the light, the cheek turning away
+    lum = .97 - smooth(.481, .493, xf) * .26;
+    ca = -.06; l = (1.5 + R() * 2.5) * U; w = (1.1 + R() * .6) * U;
+  } else if (p === BEARD) { lum = .5 + (vnoise(xf * 2600, pf * 500) - .5) * .3 - smooth(.484, .492, xf) * .16; ca = -.28; sa = .96; l = (1.5 + R() * 2) * U; w = (1 + R() * .5) * U; }
+  else if (p === SHADE) { lum = .04; ca = .98; sa = .17; l = 2 * U; w = .8 * U; }   // his eye under the brow, his mouth in the beard
+  else if (p === HAIR) { lum = .2 + (vnoise(xf * 2600, pf * 400) - .5) * .2; ca = .1; sa = .99; l = (2 + R() * 3) * U; w = (1 + R() * .6) * U; }   // it falls on his collar
+  else if (p === NECK) { lum = .44 - smooth(.4245, .4205, pf) * .2 - smooth(.492, .499, xf) * .12; w = (1.1 + R() * .6) * U; }
+  else if (p === PALM) {                                       // a frond: leaflet beside leaflet, all of them pointing up
+    lum = .92 - (((xf * 1.3 + pf) * 130) % 1 < .28 ? .24 : 0); ca = .5; sa = -.866; l = (2 + R() * 2.5) * U; w = (1 + R() * .4) * U;
+  } else if (p === HAND) {                                     // fingers, one above the other
+    const q = (pf - (xf < .49 ? .4598 : .4615)) / (xf < .49 ? .0036 : .0055);
+    lum = q - Math.floor(q) > .72 ? .46 : .95; ca = .99; sa = xf < .49 ? -.1 : .12; l = (1.5 + R() * 2) * U; w = Math.max(.8 * U, Math.min(1.3 * U, .0019 * PH));
+  } else if (p === CROSS) {                                    // dark, its upper faces in the light; on it the body, small and pale
+    const dx = Math.abs(xf - crX(pf)), arm = dx > .0042, dy = Math.abs(pf - armY(xf));
+    if (arm) { ca = .996; sa = -.09; lum = partAt(x, y - up) === CROSS ? .12 : .4; if (xf > .437 && xf < .461 && dy < .0012) lum = .66; }
+    else { ca = (CR[2] - CR[0]) * PW; sa = (CR[3] - CR[1]) * PH; const q = 1 / Math.hypot(ca, sa); ca *= q; sa *= q; lum = partAt(x - up, y) === CROSS ? .12 : .38; if (pf > .431 && pf < .456 && dx < .002) lum = .76; }
+    lum += (R() - .5) * .1; w = (1 + R() * .4) * U; l = (2 + R() * 3) * U;
   } else if (p === BASE || p === PLINTH) { lum = .5 + (fbm(xf * 90, pf * 300) - .5) * .5; ca = 1; sa = 0; l = (3 + R() * 5) * U; }
   else if (p === LEDGE) { lum = pf > .5965 ? .48 : .84; ca = 1; sa = 0; l = (3 + R() * 6) * U; w = 1.5 * U; }
   else if (p === SIDE) { lum = (evening ? .8 : .5) + (fbm(xf * 200, pf * 90) - .5) * .3; l = (3 + R() * 5) * U; }
-  else {                                                       // the front of the pedestal: leaves and scrolls carved over what is written
-    lum = .8 + (fbm(xf * 120 + 7, pf * 160) - .5) * .3 - (xf < .455 ? .2 : 0);
-    if (pf > .603 && pf < .6195) { const q = Math.sin((xf - .4855) * 520) * Math.cos((pf - .611) * 620); lum += q > .35 ? .12 : q < -.35 ? -.26 : 0; l = 2 * U; }
-    ca = 1; sa = 0;
-  }
+  else { lum = .8 + (fbm(xf * 120 + 7, pf * 160) - .5) * .3 - (xf < .455 ? .2 : 0) - smooth(.608, .6, pf) * .12; ca = 1; sa = 0; }   // the front of the pedestal: bare stone, the ledge's shade along its top
   // it is round: every part of him is lighter where it turns to the light and darker where it turns away
-  if (p < PLINTH) lum += p === HEAD || p === HAND || p === CAP ? -side * .06 : (partAt(x - e, y) === p ? 0 : .07) - (partAt(x + e, y) === p ? 0 : .2) - (partAt(x, y + e) === p ? 0 : .1) - side * .1;
-  lum -= grime * (p === PLINTH || p === BASE ? .3 : .16) + (wet ? .1 : 0);
+  if (small) lum -= side * .06;
+  else if (p < PLINTH) lum += (partAt(x - e, y) === p ? 0 : .07) - (partAt(x + e, y) === p ? 0 : .2) - (partAt(x, y + e) === p ? 0 : .1) - side * .1;
+  lum -= grime * (p === PLINTH || p === BASE ? .3 : small ? .06 : .16) + (wet ? .1 : 0);
   let c = ramp(set, lum);
   if (p === PLINTH || p === BASE) c = mix(c, pal.moss, .2 + grime * .3);
   if (night && pal === own) c = mix(c, traits.veiled ? pal.skyLow : pal.moonGlow, .1 + lum * .13);   // the moon is on him, or what light the clouds send back
   const sd = shadow(x, y); if (sd) c = mix(c, set[0], sd * .22);
-  if (dab) PP.dab(x, y, dab * Math.max(U, .0016 * PH), c, { a: .95, den: 1.5, core: .8, s: U, jit: 4 });
-  else { run(x, y, ca, sa, l, mine, U); PP.brush(x - ca * reach[0], y - sa * reach[0], x + ca * reach[1], y + sa * reach[1], w, c, o); }
-  if (xf > .53 && pf > .575) ironOver(x - 6 * U, y - 6 * U, x + 6 * U, y + 6 * U);
+  run(x, y, ca, sa, l, mine, small ? .8 * U : U);
+  const a = reach[0], b = reach[1];
+  run(x, y, -sa, ca, w * .62, mine, Math.max(.5, .4 * U));       // and no wider than there is room for it
+  if (reach[0] + reach[1] < w) { const sh = (reach[1] - reach[0]) / 2; x -= sa * sh; y += ca * sh; w = Math.max(.8, reach[0] + reach[1]); }
+  PP.brush(x - ca * a, y - sa * a, x + ca * b, y + sa * b, w, c, small ? { a: 1.3, jit: 3, dry: 0, bow: 0, sp: w * .7, full: 1 } : { a: .95, jit: 4, dry: .03, bow: 0, sp: Math.min(1.1 * U, w) });   // the small parts with a loaded brush
+  if (xf > .53 && pf > .575) ironOver(x - a - w, y - a - w, x + b + w, y + b + w);
 }
 function lanternStroke(x, y) {                                 // red glass under a little roof of tin
   const R = PP.R, p = zp, top = py(LB[1]);
@@ -539,33 +589,70 @@ function lanternStroke(x, y) {                                 // red glass unde
 }
 
 // ---------- the fence ----------
-function drawIron(e) {                                         // a bar of it, a scroll, a flower
-  const R = PP.R;
-  lightAt(fx(e.mx), fy(e.my)); veil(.18);
-  const c = e.kind === TUBE ? mix(pal.tube, pal.dark, R() * .3) : mix(pal.iron, pal.tube, R() * .25);
-  if (e.pts.length === 1) { PP.dab(e.mx, e.my, e.w * .55, c, { a: 1, den: 2.4, core: 1, s: .9 * U, jit: 3 }); return; }
-  PP.line(e.pts, c, e.w, { pass: 1, wob: .2 * U, a: .95, step: 999, jit: 5 });
-  if (e.kind === TUBE) { if (R() < .5) PP.line(e.pts.map(q => [q[0] - e.w * .2, q[1] - e.w * .25]), mix(pal.tube, pal.towerLight, .35), e.w * .3, { pass: 1, wob: .2 * U, a: .7, step: 999 }); return; }   // the light on it
-  if (!white || !e.mark || R() > white) return;
-  if (e.mark === 1) PP.line(e.pts.map(q => [q[0], q[1] - e.w * .7]), pal.snow, e.w * .8, { pass: 1, wob: .2 * U, a: .95, step: 999, jit: 3 });   // snow lies along the rails, and a cap of it on every scroll
-  else { let t = e.pts[0]; for (const q of e.pts) if (q[1] < t[1]) t = q; PP.dab(t[0], t[1] - e.w * .5, e.w * 1.2, pal.snow, { a: .95, den: 1.6, core: .8, s: U, sx: 1.7, sy: .6, jit: 3 }); }
+// Wrought iron is a few dark strokes: each bar and scroll is brushed a stretch at a time, thick and thin as the
+// brush happens to take it, with a lighter stroke on the side the sky is on.
+function ironPiece(e, s0, s1) {
+  const R = PP.R, pts = e.pts, cum = e.cum, tube = e.kind === TUBE;
+  veil(tube ? .05 : .18);
+  if (!e.len) {                                                // a flower: two short fat strokes across each other, a glint on it
+    const x = pts[0][0], y = pts[0][1], r = e.w * .5, o = { a: .95, jit: 4, dry: 0, bow: 0, sp: U };
+    if (zone(x, y) !== FENCE) return;
+    lightAt(zx, zy);
+    PP.brush(x - r, y, x + r, y, r * .8, pal.iron, o); PP.brush(x, y - r, x, y + r, r * .8, mix(pal.iron, pal.tube, .3), o);
+    PP.brush(x - r * .5, y - r * .45, x - r * .1, y - r * .5, U, mix(pal.tube, pal.towerLight, .34), { a: .8, jit: 4, dry: 0, bow: 0, sp: U });
+    return;
+  }
+  for (let i = 0; i < pts.length - 1; i++) {
+    if (cum[i + 1] <= s0) continue;
+    if (cum[i] >= s1) break;
+    const d = cum[i + 1] - cum[i], t0 = Math.max(0, (s0 - cum[i]) / d), t1 = Math.min(1, (s1 - cum[i]) / d), p = pts[i], q = pts[i + 1];
+    const xa = p[0] + (q[0] - p[0]) * t0, ya = p[1] + (q[1] - p[1]) * t0, xb = p[0] + (q[0] - p[0]) * t1, yb = p[1] + (q[1] - p[1]) * t1, mx = (xa + xb) / 2, my = (ya + yb) / 2;
+    if (mx < 0 || my < 0 || mx >= W || my >= H) continue;
+    const z = zone(mx, my);                                    // not where a leaf, the bench's boards or the grass are in front of it
+    if (e.free ? z !== GRASS && z !== PATH : tube ? z !== BENCH || zp !== TUBE : z !== FENCE) continue;
+    lightAt(zx, zy);
+    const h = hash1(e.id * 37 + i), w = e.w * (1 - e.taper * (cum[i] + d * (t0 + t1) / 2) / e.len) * (.85 + R() * .3), bw = Math.max(w * .62, w - 1.3 * U), flat = Math.abs(yb - ya) < Math.abs(xb - xa);
+    PP.brush(xa, ya, xb, yb, bw, tube ? mix(pal.tube, pal.dark, h * .4) : mix(pal.iron, pal.tube, h * .35 + R() * .12), bw < 2 * U ? { a: 1.1, jit: 4, dry: 0, bow: 0, sp: bw } : { a: 1.1, jit: 4, dry: 0, bow: 0, sp: U, full: 1 });   // a thin one in one go, a thick one filled in
+    if (white && e.mark === 1 && flat && R() < white) PP.brush(xa, ya - w * .55, xb, yb - w * .55, w * .6, pal.snow, { a: .95, jit: 3, dry: 0, bow: 0, sp: Math.min(1.1 * U, w * .6) });   // snow lies along the rails
+    else if (hash1(e.id * 53 + i * 7) < e.lit) {
+      const lw = Math.max(.7 * U, w * .34), k = flat ? .34 : .22;
+      PP.brush(xa - w * (flat ? .08 : .3), ya - w * k, xb - w * (flat ? .08 : .3), yb - w * k, lw, mix(pal.tube, pal.towerLight, (tube ? .5 : .34) + (wet ? .14 : 0)), { a: tube ? .95 : .8, jit: 4, dry: 0, bow: 0, sp: lw });
+    }
+  }
+  if (e.knob && s1 >= e.len && s0 < e.len) {                   // a scroll ends in a knob
+    const q = pts[pts.length - 1];
+    if (q[0] >= 0 && q[1] >= 0 && q[0] < W && q[1] < H && zone(q[0], q[1]) === FENCE) PP.dab(q[0], q[1], e.w * .45, pal.iron, { a: .95, den: 2, core: .9, s: .8 * U, jit: 3 });
+  }
+  if (white && e.mark === 2 && s0 <= e.top && s1 >= e.top && R() < white) PP.dab(e.tx, e.ty - e.w * .5, e.w * 1.1, pal.snow, { a: .95, den: 1.6, core: .8, s: U, sx: 1.7, sy: .6, jit: 3 });   // and a cap of it on every scroll
 }
 function ironStroke() {                                        // it is all thin: every piece gets strokes of its own
   const R = PP.R, k = R() * elWeight;
   let a = 0, b = els.length - 1;
   if (b < 0) return;
   while (a < b) { const m = (a + b) >> 1; if (elSum[m] < k) a = m + 1; else b = m; }
-  const e = els[a], x = clamp(e.mx, 0, W - 1), y = clamp(e.my, 0, H - 1);
-  if (!at(x, y)) return;
-  const z = zone(x, y);
-  if (e.kind === TUBE ? z === BENCH && zp === TUBE : z === FENCE) drawIron(e);
+  const e = els[a], span = (5 + R() * 9) * U, s0 = e.len > span ? R() * (e.len - span) : 0, sm = Math.min(e.len, s0 + span / 2);
+  let i = 0; while (i < e.pts.length - 2 && e.cum[i + 1] < sm) i++;
+  const p = e.pts[i], q = e.pts[Math.min(i + 1, e.pts.length - 1)], t = e.len ? (sm - e.cum[i]) / (e.cum[i + 1] - e.cum[i]) : 0;
+  if (at(clamp(p[0] + (q[0] - p[0]) * t, 0, W - 1), clamp(p[1] + (q[1] - p[1]) * t, 0, H - 1))) ironPiece(e, s0, s0 + span);
 }
-function ironOver(xa, ya, xb, yb) {                            // something has been painted behind the fence: it goes back in front of it at once
+function ironOver(xa, ya, xb, yb) {                            // something has been painted behind the fence: what it ran over goes back in front of it at once
   if (yb < iy0 || ya > iy1) return;
   const keep = pal;
   for (let b = Math.max(0, (xa / bucketW) | 0), n = Math.min(buckets.length - 1, (xb / bucketW) | 0); b <= n; b++) for (const e of buckets[b]) {
     if (e.seen === stampN || e.x1 < xa || e.x0 > xb || e.y1 < ya || e.y0 > yb) continue;
-    e.seen = stampN; drawIron(e);
+    e.seen = stampN;
+    if (!e.len) { ironPiece(e, 0, 0); continue; }
+    let s0 = 1e9, s1 = -1;
+    for (let i = 0, pts = e.pts; i < pts.length - 1; i++) {      // the stretch of it that lies in the box
+      const p = pts[i], q = pts[i + 1], dx = q[0] - p[0], dy = q[1] - p[1];
+      let t0 = 0, t1 = 1;
+      if (dx) { const u = (xa - p[0]) / dx, v = (xb - p[0]) / dx; t0 = Math.max(t0, Math.min(u, v)); t1 = Math.min(t1, Math.max(u, v)); } else if (p[0] < xa || p[0] > xb) continue;
+      if (dy) { const u = (ya - p[1]) / dy, v = (yb - p[1]) / dy; t0 = Math.max(t0, Math.min(u, v)); t1 = Math.min(t1, Math.max(u, v)); } else if (p[1] < ya || p[1] > yb) continue;
+      if (t1 <= t0) continue;
+      const d = e.cum[i + 1] - e.cum[i];
+      s0 = Math.min(s0, e.cum[i] + t0 * d); s1 = Math.max(s1, e.cum[i] + t1 * d);
+    }
+    if (s1 > s0) ironPiece(e, s0 - 1.5 * U, s1 + 1.5 * U);
   }
   stampN++; pal = keep;
 }
@@ -601,63 +688,98 @@ function wallStroke(x, y) {
   const sd = shadow(x, y); if (sd) c = mix(c, pal.rubble[0], sd * .25);
   run(x, y, ca, sa, l, z => z === WALL && bandOf(zx, zy) === b, 1.5 * U);
   PP.brush(x - ca * reach[0], y - sa * reach[0], x + ca * reach[1], y + sa * reach[1], w, c, o);
-  if (b === 0) ironOver(x - reach[0] - U, y - 4 * U, x + reach[1] + U, y + 4 * U);
+  if (b === 0) ironOver(x - reach[0] - U, y - w * .6 - 2 * U, x + reach[1] + U, y + w * .6 + 2 * U);
 }
 
 // ---------- the bench ----------
-const off = (a, b, x, y) => ((px(b[0]) - px(a[0])) * (y - py(a[1])) - (py(b[1]) - py(a[1])) * (x - px(a[0]))) / Math.hypot(px(b[0]) - px(a[0]), py(b[1]) - py(a[1]));   // how far below a line a point is
+// Its boards are painted along the grain, every stroke inside its board: where in one a point is, how far along
+// it (qf) and how far across (qv), and the point at such a place.
+let qf = 0, qv = 0;
+function inBoard(q, xf, pf) {
+  let f = clamp((xf - q[0]) / (q[2] - q[0])), v = 0;
+  for (let n = 0; n < 3; n++) {
+    const top = q[1] + (q[3] - q[1]) * f, foot = q[7] + (q[5] - q[7]) * f; v = clamp((pf - top) / (foot - top));
+    const xl = q[0] + (q[6] - q[0]) * v, xr = q[2] + (q[4] - q[2]) * v; f = clamp((xf - xl) / (xr - xl));
+  }
+  qf = f; qv = v;
+}
+const boardX = (q, f, v) => px((q[0] + (q[2] - q[0]) * f) * (1 - v) + (q[6] + (q[4] - q[6]) * f) * v);
+const boardY = (q, f, v) => py((q[1] + (q[3] - q[1]) * f) * (1 - v) + (q[7] + (q[5] - q[7]) * f) * v);
+function benchShade(xf, pf) {                                  // how dark it is on the ground under the bench, and behind its back
+  if (xf < .46 || xf > 1 || pf < .82 || pf > 1.2) return 0;
+  const f = clamp((xf - SEATQ[6]) / (SEATQ[4] - SEATQ[6])), front = RIMQ[7] + (RIMQ[5] - RIMQ[7]) * f, back = SEATQ[1] + (SEATQ[3] - SEATQ[1]) * clamp((xf - SEATQ[0]) / (SEATQ[2] - SEATQ[0]));
+  if (pf > front) return .75 * smooth(front + .05, front + .008, pf);
+  const s = SLATS[0], top = s[1] + (s[3] - s[1]) * clamp((xf - s[0]) / (s[2] - s[0]));
+  return pf < back + .01 && pf > top && xf > s[0] && xf < s[4] + .01 ? .55 : 0;
+}
 function benchStroke(x, y) {
-  const R = PP.R, p = zp, xf = zx, pf = zy, o = { a: .93, jit: 6, dry: .06, bow: 0, sp: 1.1 * U };
+  const R = PP.R, p = zp, xf = zx, pf = zy;
   if (p === TUBE) return;
   lightAt(xf, pf); veil(.05);
-  let sl, c, w = (1.4 + R() * 1.2) * U, l = (4 + R() * 9) * U;
+  const q = p === SEAT ? SEATQ : p === RIM ? RIMQ : SLATS[p - SLAT];
+  inBoard(q, xf, pf);
+  const f = qf, deep = Math.hypot(boardX(q, f, 1) - boardX(q, f, 0), boardY(q, f, 1) - boardY(q, f, 0)), long = Math.hypot(boardX(q, 1, .5) - boardX(q, 0, .5), boardY(q, 1, .5) - boardY(q, 0, .5));
+  let v = qv, v0 = 0, v1 = 1, c, w = (1.3 + R() * 1.1) * U, l = (5 + R() * 10) * U;
   if (p === SEAT) {                                            // five boards, grey with weather, lichen on them
-    const db = off(SEAT0, SEAT1, x, y), df = -off(SEAT2, SEAT3, x, y), t = clamp(db / (db + df)), i = Math.min(4, (t * 5) | 0), fr = t * 5 - i;
-    sl = (SEAT1[1] - SEAT0[1]) / (SEAT1[0] - SEAT0[0]) + ((SEAT3[1] - SEAT2[1]) / (SEAT3[0] - SEAT2[0]) - (SEAT1[1] - SEAT0[1]) / (SEAT1[0] - SEAT0[0])) * t;
-    if (fr < .1 && i) { c = mix(pal.plank[0], pal.dark, .3); w = U; }
+    const i = Math.min(4, (v * 5) | 0);
+    if (i && v * 5 - i < .1) { w = Math.max(.8 * U, deep * .014); v0 = i / 5 - w / 2 / deep; v1 = i / 5 + w / 2 / deep; c = mix(pal.plank[0], pal.dark, .3); }   // the gap between two of them
     else if (white && R() < white * .93) c = pal.snow;
     else {
-      c = ramp(pal.plank, .5 + (fbm(xf * 60 + i * 3, t * 9) - .5) * 1.1 + (hash1(i * 7 + 3) - .5) * .2 + (R() - .5) * .15);
-      if (vnoise(xf * 40 + 3, t * 6) > .62) c = mix(c, pal.lichen, .3);
+      v0 = i ? i / 5 + .012 : 0; v1 = (i + 1) / 5 - (i < 4 ? .012 : 0);
+      c = ramp(pal.plank, .56 + (vnoise(v * 24 + i * 9, f * 5) - .5) * .8 + (hash1(i * 7 + 3) - .5) * .2 + (R() - .5) * .12 - (1 - v) * .1 + (f > .985 ? .2 : 0));
+      if (vnoise(f * 46 + 3, v * 9) > .68) c = mix(c, pal.lichen, .28);
       if (wet) c = mix(mix(c, pal.plank[0], .35), pal.skyLow, .2);
     }
-  } else {                                                     // a slat: what paint is left on it peels
-    const s = SLATS[p - SLAT], f = clamp((xf - s[0]) / (s[2] - s[0])), top = s[1] + (s[3] - s[1]) * f, v = clamp((pf - top) / (s[7] + (s[5] - s[7]) * f - top));
-    sl = (s[3] - s[1]) / (s[2] - s[0]);
+  } else if (p === RIM) {                                      // its edge, in its own shade
+    c = white && v < .35 && R() < white ? pal.snow : v < .3 ? ramp(pal.plank, .45 + R() * .2) : mix(pal.plank[0], pal.dark, .2 + R() * .3);
+    w = Math.min(w, deep * .5);
+  } else {                                                     // a slat: light on its upper edge, dark under it, and what paint is left on it peels
+    const i = p - SLAT;
     if (white && v < .4 && R() < white) c = pal.snow;
+    else if (v < .17) c = ramp(pal.plank, .74 + R() * .24);
+    else if (v > .86) c = mix(pal.plank[0], pal.dark, .35);
     else {
-      const painted = fbm(f * 16 + p * 7, v * 2.5 + p) > (p === SLAT ? .3 : .5) + v * .16;
-      c = painted ? mix(pal.paint, pal.plank[R() < .5 ? 0 : 2], R() * .25) : ramp(pal.plank, .55 + R() * .45);
-      if (v < .16) c = mix(c, pal.plank[4], .3); else if (v > .86) c = mix(c, pal.plank[0], .5);
-      if (wet) c = mix(mix(c, pal.plank[0], .3), pal.skyLow, .15);
-      if (!painted) l *= .5;
+      const painted = fbm(f * 7 + i * 7, v * 2.2 + i) > (i ? .5 : .38) && vnoise(f * 90 + i * 31, v * 9) < .78;
+      c = painted ? mix(pal.paint, pal.plank[R() < .5 ? 0 : 1], R() * .3) : ramp(pal.plank, .52 + (vnoise(f * 12 + i * 5, v * 14) - .5) * .5 + R() * .2);
+      if (!painted) l *= .6;
     }
+    if (wet) c = mix(mix(c, pal.plank[0], .3), pal.skyLow, .15);
   }
-  sl *= PH / PW; const q = 1 / Math.hypot(1, sl), ca = q, sa = sl * q;
+  if ((v1 - v0) * deep < w) w = Math.max(.8, (v1 - v0) * deep);
+  const m = Math.min((v1 - v0) / 2, w / 2 / deep);
+  v = clamp(v, v0 + m, v1 - m);
   const sd = shadow(x, y); if (sd) c = mix(c, pal.plank[0], sd * .25);
-  run(x, y, ca, sa, l, z => z === BENCH && zp === p, 1.5 * U);
-  PP.brush(x - ca * reach[0], y - sa * reach[0], x + ca * reach[1], y + sa * reach[1], w, c, o);
+  const xc = boardX(q, f, v), yc = boardY(q, f, v), fa = Math.max(0, f - l / long), fb = Math.min(1, f + l / long);
+  let xa = boardX(q, fa, v), ya = boardY(q, fa, v), xb = boardX(q, fb, v), yb = boardY(q, fb, v);
+  if (p >= SEAT && xf < .56) {                                 // the arm near us is in front of the seat
+    const la = Math.hypot(xa - xc, ya - yc), lb = Math.hypot(xb - xc, yb - yc), ca = (xb - xa) / (la + lb || 1), sa = (yb - ya) / (la + lb || 1);
+    run(xc, yc, ca, sa, Math.max(la, lb), z => z === BENCH && zp === p, 1.5 * U);
+    xa = xc - ca * Math.min(la, reach[0]); ya = yc - sa * Math.min(la, reach[0]); xb = xc + ca * Math.min(lb, reach[1]); yb = yc + sa * Math.min(lb, reach[1]);
+  }
+  PP.brush(xa, ya, xb, yb, w, c, { a: .93, jit: 6, dry: .06, bow: 0, sp: Math.min(1.1 * U, w) });
 }
 
 // ---------- the grass ----------
 const nearG = pf => clamp((pf - .6) / .42, .12, 1.3);          // how close the ground is at this height: the size of its strokes
 function grassStroke(x, y, path) {
-  const R = PP.R, xf = zx, pf = zy, sz = (.5 + nearG(pf) * .8) * U, k = R();
+  const R = PP.R, xf = zx, pf = zy, sz = (.5 + nearG(pf) * .8) * U, k = R(), dim = benchShade(xf, pf);
   lightAt(xf, pf); veil(.5 - nearG(pf) * .4);
-  if (white && k < white * .9) { snowDab(x, y, (2 + R() * 3.5) * sz); return; }
+  if (white && k < white * .9 * (1 - dim)) { snowDab(x, y, (2 + R() * 3.5) * sz); return; }
   const sd = shadow(x, y);
   if (path) {                                                  // trodden earth, grass creeping in from either side
     let c = mix(pal.gravel, pal.meadow[3], (xf > 1.05 && pf < NEAR ? smooth(.55, 1, Math.abs(xf - pathX(pf)) / pathW(pf)) : smooth(NEAR + .04, NEAR, pf)) * .6 + R() * .12);
     if (wet) c = mix(mix(c, pal.dark, .25), pal.skyLow, .18);
+    if (dim) c = mix(c, pal.meadow[0], dim * .7);
     const l = (3 + R() * 7) * sz;
     PP.brush(x - l, y, x + l, y + (R() - .5) * U, (1.4 + R() * 1.8) * sz, sd ? mix(c, pal.meadow[0], sd * .3) : c, { a: .88, jit: 7, dry: .14, sp: 1.1 * U, bow: .03 });
     return;
   }
-  if (pal.daisy && k > (season === 'spring' ? .975 : .99) && pf > .66) { PP.dab(x, y, (.8 + R() * .7) * sz, pick(pal.daisy, R()), { a: .95, den: 1.8, core: .85, s: U, jit: 4 }); return; }
+  if (pal.daisy && k > (season === 'spring' ? .975 : .99) && pf > .66 && !dim) { PP.dab(x, y, (.8 + R() * .7) * sz, pick(pal.daisy, R()), { a: .95, den: 1.8, core: .85, s: U, jit: 4 }); return; }
   if (season === 'autumn' && k > .965) { PP.dab(x, y, (1.2 + R() * 1.4) * sz, pick(pal.bits, R()), { a: .9, den: 1.4, core: .8, s: 1.3 * U }); return; }   // leaves the walnut has dropped
   let c = ramp(pal.meadow, .2 + fbm(xf * 22 + 5, pf * 30) * .75 + (R() - .5) * .3);
   if (k < .08) c = mix(c, pal.straw, .5);
   if (sd) c = mix(c, pal.meadow[0], sd * .45);
+  if (dim) c = mix(c, mix(pal.meadow[0], pal.dark, .3), dim);   // no sun gets under the bench
   const a = -Math.PI / 2 + (R() - .5) * .8 + wind(time) * .07, ca = Math.cos(a), sa = Math.sin(a), l = (2.5 + R() * 5) * sz;
   run(x, y, ca, sa, l, z => z !== BENCH && z !== LANTERN, Math.max(1.5, 2 * sz));
   PP.brush(x - ca * Math.min(reach[0], l * .3), y - sa * Math.min(reach[0], l * .3), x + ca * reach[1], y + sa * reach[1], (1.2 + R() * 2) * sz, c, { a: .87, jit: 8, dry: .18, sp: 1.1 * U, bow: .12 });
@@ -718,14 +840,14 @@ function coatStroke(x0, y0, leaves, again) {                   // a fresh coat: 
     if (k === HILL) { veil(.8); PP.brush(x - l, y, x + l, y - l * .1, 16 * U, mix(bare ? mix(pal.twigs[1], white ? pal.snow : pal.meadow[2], .4) : green(.5), pal.haze, .3), o); }
     else if (k === HEDGE || k === LEAVES) { const a = (R() - .5) * 1.2; veil(k === HEDGE ? .5 : treeOff(xf)); PP.brush(x - Math.cos(a) * l * .8, y - Math.sin(a) * l * .8, x + Math.cos(a) * l * .8, y + Math.sin(a) * l * .8, 20 * U, bare ? mix(mix(pal.twigs[2], pal.haze, .5), pal.twigs[1], .5) : green(.32), o); }
     else if (k === BEDS || k === FENCE) { veil(.22); PP.brush(x - l, y, x + l, y, 16 * U, white ? mix(pal.bed[1], pal.snow, white * .7) : pal.bed[1], o); }
-    else if (k === STATUE || k === LANTERN) { veil(.26); PP.brush(x, y - 7 * U, x, y + 7 * U, 5 * U, k === LANTERN ? pal.lampRed : zp === CAPE ? pal.fur[1] : zp === CLOAK ? pal.robe[1] : ramp(pal.figure, zp === STAR ? .3 : .62), o); }
+    else if (k === STATUE || k === LANTERN) { veil(.26); PP.brush(x, y - 7 * U, x, y + 7 * U, 5 * U, k === LANTERN ? pal.lampRed : zp === CAPE ? pal.fur[1] : zp === CLOAK ? pal.robe[1] : ramp(pal.figure, zp === STAR || zp === CAP || zp === CROSS || zp === HAIR ? .35 : .62), o); }
     else if (k === WALL) {                                     // the coping is narrow: a stroke right along the middle of its top, and of its front
       const b = bandOf(xf, pf), sl = -(pf - WV) / (VX - xf) * PH / PW, q = 1 / Math.hypot(1, sl), ya = wallY(b ? EDGE : BACK, xf), yb = wallY(b ? DRIP : EDGE, xf), yc = b === 2 ? y : py((ya + yb) / 2);
       veil(.14); PP.brush(x - q * l, yc - sl * q * l, x + q * l, yc + sl * q * l, b === 2 ? 16 * U : (yb - ya) * PH * .9, b === 2 ? pal.rubble[2] : b ? pal.cope[1] : white ? mix(pal.cope[0], pal.snow, white) : mix(pal.cope[0], pal.moss, .4), o);
     } else if (k === BENCH) {
       if (zp === TUBE) continue;
       const sl = -.16 * PH / PW, q = 1 / Math.hypot(1, sl);
-      veil(.05); PP.brush(x - q * l * .7, y - sl * q * l * .7, x + q * l * .7, y + sl * q * l * .7, 7 * U, zp === SEAT && white ? mix(pal.plank[2], pal.snow, white) : pal.plank[zp === SEAT ? 2 : 1], o);
+      veil(.05); PP.brush(x - q * l * .7, y - sl * q * l * .7, x + q * l * .7, y + sl * q * l * .7, 7 * U, zp === SEAT && white ? mix(pal.plank[2], pal.snow, white) : pal.plank[zp === SEAT ? 2 : zp === RIM ? 0 : 1], o);
     } else { veil(.5 - nearG(pf) * .4); PP.brush(x - l, y, x + l, y, 16 * U, white ? mix(pal.meadow[2], pal.snow, white * .85) : k === PATH ? pal.gravel : pal.meadow[2], o); }
   }
 }
@@ -770,7 +892,7 @@ const RATE = { land: 11500, tree: 9000, figure: 30000, bench: 9000, iron: 1.5, l
 const place = {
   colors: {
     figure: ['#45433f', '#7b7870', '#aeaaa0', '#d6d2c5', '#f3f0e6'], fur: ['#3a3a3a', '#605f5c', '#8c8a83', '#bcb8ad'], robe: ['#5c4440', '#8d6860', '#b28e83', '#d2b8ab'],
-    starGold: '#8f7038', writ: '#4a463f', iron: '#1c1f23', tube: '#3d454d', lampRed: '#a52c26',
+    starGold: '#8f7038', iron: '#1c1f23', tube: '#3d454d', lampRed: '#a52c26',
     rubble: ['#4a4943', '#6f6d64', '#96938a', '#bbb7a9', '#d8d4c5'], ochre: '#b29f78', lichen: '#dfe3d2', cope: ['#55544c', '#7b7970', '#a19e93', '#c4c1b4'], moss: '#59603c', straw: '#b8a877',
     plank: ['#34363a', '#5a5a57', '#86837a', '#aca798', '#cbc6b8'], paint: '#555b63',
     bed: ['#16351c', '#2c6428', '#55982f', '#8fc93e', '#cbe86a'], peony: null, cranesbill: '#c66fd2', bloom: '#f3f1dc', daisy: ['#ffffff', '#f6e9a6', '#ffffff'],
@@ -812,9 +934,9 @@ const place = {
       box('wb-tree', RATE.tree, 0, 0, tx, split),                                       // the walnut
       box('wb-ridge', RATE.land, tx, landTop, W, split),                                // the hill and the top of the hedge
       box('wb-mid', RATE.land, 0, split, W, py(.7)), box('wb-low', RATE.land, 0, py(.7), W, H),
-      box('wb-figure', RATE.figure, px(SB[0]), py(SB[1]), px(SB[2]), py(SB[3])),
+      box('wb-figure', RATE.figure, px(SB[0]), py(SB[1]), px(SB[2]), py(SB[3])), box('wb-bust', RATE.figure * 2, px(.426), py(.392), px(.534), py(.48)),   // his head and hands once more: they are small
       box('wb-lantern', RATE.figure * 2, px(LB[0]), py(LB[1]), px(LB[2]), py(LB[3])),
-      box('wb-bench', RATE.bench, px(.46), py(.815), px(1), py(1.07)),
+      box('wb-bench', RATE.bench, px(.46), py(.815), px(1), py(1.125)),
     ];
   },
   tick(t) { time = t; sway = wind(t) * 2 * U; },
@@ -835,7 +957,7 @@ const place = {
   paint(pace, s, o) {                                          // s, o: the picture and the one under it, where they show this place
     const ua = U * U * 1e6;
     for (const b of boxes) spend(b.key, b.n * pace, b.fn);
-    spend('wb-iron', RATE.iron * els.length * pace, ironStroke);
+    spend('wb-iron', RATE.iron * elWeight / (10 * U) * pace, ironStroke);
     spend('wb-limb', RATE.limb * limbLength / (14 * U) * pace, limbStroke);
     if ((s && s.night) || (o && o.night)) spend('wb-lamp', RATE.lamp * pace, lampDab);
     if ((s && s.traits.fog) || (o && o.traits.fog)) spend('wb-fog', RATE.fog * W * .26 * PH / ua * pace, fogStroke);
