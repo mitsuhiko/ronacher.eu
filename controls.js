@@ -84,7 +84,7 @@ function fanOut(control, focus) {
 }
 
 // Down from the top of the screen, up from the bottom, along a wide arc that bends away from the edge;
-// each tag is turned along the arc's radius.  When the screen is too short for all of them, the rest go
+// each tag is turned a little the way the arc runs, a third as far as its radius is.  When the screen is too short for all of them, the rest go
 // on a second arc further in.
 function layout(control, items, down, rect) {
   const rem = remPx(), gap = .45 * rem, step = 1.95 * rem, R = 56 * rem, margin = .6 * rem;
@@ -102,7 +102,7 @@ function layout(control, items, down, rect) {
     const th = Math.asin(Math.min(.9, d / R));
     const x = -(R - R * Math.cos(th)) - shift;
     const y = down ? ch + d - h / 2 : -d - h / 2;
-    const r = (down ? th : -th) * 180 / Math.PI + ((i * 7) % 5 - 2) * .35;   // and a little of a hand's unevenness
+    const r = (down ? th : -th) * 180 / Math.PI / 3 + ((i * 7) % 5 - 2) * .35;   // and a little of a hand's unevenness
     b.style.setProperty('--x', x.toFixed(1) + 'px');
     b.style.setProperty('--y', y.toFixed(1) + 'px');
     b.style.setProperty('--r', r.toFixed(2) + 'deg');
